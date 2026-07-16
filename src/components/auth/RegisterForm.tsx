@@ -43,12 +43,11 @@ export default function RegisterForm() {
     setError("");
 
     if (
-      !formData.fullName ||
-      !formData.email ||
-      !formData.password ||
-      !formData.gender ||
-      !formData.dob
-    ) {
+  !formData.fullName ||
+  !formData.email ||
+  !formData.password
+)
+ {
       setError("Please fill all fields.");
       return;
     }
