@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Menu, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useRouter } from "next/navigation";
 
 const links = [
   {
@@ -26,7 +27,7 @@ const links = [
 ];
 
 export default function Navbar() {
-
+const router = useRouter();
   const [scrolled, setScrolled] = useState(false);
 
   const [visible, setVisible] = useState(true);
@@ -306,6 +307,7 @@ export default function Navbar() {
           >
 
             <button
+            onClick={() => router.push("/login")}
               className="
               hidden
 
@@ -320,10 +322,12 @@ export default function Navbar() {
               lg:block
               "
             >
+              
               Sign In
             </button>
 
             <button
+            onClick={() => router.push("/register")}
               className="
               hidden
 
