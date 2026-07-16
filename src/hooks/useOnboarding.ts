@@ -72,13 +72,13 @@ setError("");
 
     router.push("/");
 
-  } catch (error) {
+  } catch (error: any) {
 
-    console.error(error);
+  console.error(error);
 
-    alert("Failed to save onboarding.");
+  alert(error.message);
 
-  } finally {
+} finally {
 
     setLoading(false);
 
