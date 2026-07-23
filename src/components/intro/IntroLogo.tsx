@@ -75,6 +75,7 @@ export default function IntroLogo() {
             src="/branding/logo.png"
             alt="Siber Logo"
             fill
+            sizes="(max-width: 768px) 180px, 210px"
             priority
             className="
               object-cover

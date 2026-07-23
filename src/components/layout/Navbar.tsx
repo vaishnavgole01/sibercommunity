@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Menu, X } from "lucide-react";
+import { ArrowRight, Menu, Rocket, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 
@@ -163,16 +163,15 @@ const router = useRouter();
               className="
               relative
 
-              h-14
-              w-14
+              h-16
+              w-16
 
               overflow-hidden
 
               rounded-full
 
-              ring-1
-
-              ring-white/20
+              border
+              border-white
 
               transition-transform
 
@@ -196,13 +195,15 @@ const router = useRouter();
 
               <h2
                 className="
-                text-[28px]
+                text-[34px]
+                md:text-3xl
 
-                font-black
+                font-extrabold
 
                 tracking-[-0.03em]
 
                 text-white
+                drop-shadow-[0_8px_30px_rgba(16,185,129,0.12)]
                 "
               >
                 Siber
@@ -236,7 +237,7 @@ const router = useRouter();
 
             items-center
 
-            gap-10
+            gap-12
 
             lg:flex
             "
@@ -252,11 +253,13 @@ const router = useRouter();
 
                 relative
 
-                text-sm
+                text-base
 
-                font-medium
+                md:text-lg
 
-                text-zinc-300
+                font-semibold
+
+                text-zinc-200
 
                 transition
 
@@ -270,11 +273,11 @@ const router = useRouter();
                   className="
                   absolute
 
-                  -bottom-2
+                  -bottom-3
 
                   left-0
 
-                  h-[2px]
+                  h-[3px]
 
                   w-0
 
@@ -311,29 +314,9 @@ const router = useRouter();
               className="
               hidden
 
-              text-sm
-
-              text-zinc-300
-
-              transition
-
-              hover:text-white
-
-              lg:block
-              "
-            >
-              
-              Sign In
-            </button>
-
-            <button
-            onClick={() => router.push("/register")}
-              className="
-              hidden
-
               rounded-xl
 
-              bg-lime-300
+              bg-gradient-to-r from-lime-300 to-emerald-400
 
               px-6
 
@@ -351,9 +334,46 @@ const router = useRouter();
 
               hover:shadow-[0_0_35px_rgba(200,255,58,.45)]
 
-              lg:block
+              lg:flex
+              lg:items-center
+              lg:gap-2
               "
             >
+              Sign In
+              <ArrowRight size={16} className="text-black/80" />
+            </button>
+
+            <button
+            onClick={() => router.push("/register")}
+              className="
+              hidden
+
+              rounded-xl
+
+              bg-gradient-to-r from-lime-300 to-emerald-400
+
+              px-6
+
+              py-3
+
+              font-semibold
+
+              text-black
+
+              transition-all
+
+              duration-300
+
+              hover:scale-105
+
+              hover:shadow-[0_0_35px_rgba(200,255,58,.45)]
+
+              lg:flex
+              lg:items-center
+              lg:gap-2
+              "
+            >
+              <Rocket size={16} className="text-black" />
               Get Started
             </button>
 
@@ -477,13 +497,15 @@ const router = useRouter();
                     className="
                     relative
 
-                    h-12
+                    h-16
 
-                    w-12
+                    w-16
 
                     overflow-hidden
 
                     rounded-full
+                    border
+                    border-white
                     "
                   >
 
@@ -572,13 +594,18 @@ const router = useRouter();
 
                 rounded-2xl
 
-                bg-lime-300
+                bg-gradient-to-r from-lime-300 to-emerald-400
 
                 py-4
 
                 font-semibold
 
                 text-black
+
+                flex
+                items-center
+                justify-center
+                gap-2
 
                 transition-all
 
@@ -587,7 +614,9 @@ const router = useRouter();
                 hover:scale-[1.02]
                 "
               >
+                <Rocket size={18} className="text-black" />
                 Get Started
+                <ArrowRight size={18} className="text-black/80" />
               </button>
 
             </motion.div>

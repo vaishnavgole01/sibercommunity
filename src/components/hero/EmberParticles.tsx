@@ -6,16 +6,18 @@ import { motion } from "framer-motion";
 interface Ember {
   id: number;
   left: number;
-  size: number;
+  width: number;
+  height: number;
   duration: number;
   drift: number;
   color: string;
+  borderRadius: string;
 }
 
 const COLORS = [
-  "#ff5e3a",
-  "#ffb800",
-  "#ff8ab8",
+  "#ffd86f",
+  "#ff8f2b",
+  "#ff4b12",
 ];
 
 export default function EmberParticles() {
@@ -25,27 +27,36 @@ export default function EmberParticles() {
     let id = 0;
 
     const interval = setInterval(() => {
-      const color =
-        COLORS[Math.floor(Math.random() * COLORS.length)];
+      const nextEmbers: Ember[] = [];
 
-      const ember: Ember = {
-        id: id++,
-        left: Math.random() * 100,
-        size: 2 + Math.random() * 4,
-        duration: 4 + Math.random() * 4,
-        drift: (Math.random() - 0.5) * 180,
-        color,
-      };
+      for (let i = 0; i < 2; i += 1) {
+        const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+        const width = 2 + Math.random() * 2.5;
+        const height = width * (1.6 + Math.random() * 0.8);
 
-      setEmbers((prev) => [...prev, ember]);
+        nextEmbers.push({
+          id: id++,
+          left: Math.min(100, Math.max(0, Math.random() * 100)),
+          width,
+          height,
+          duration: 1.8 + Math.random() * 1.6,
+          drift: (Math.random() - 0.5) * 60,
+          color,
+          borderRadius: `${55 + Math.random() * 15}% ${40 + Math.random() * 20}% ${65 + Math.random() * 10}% ${60 + Math.random() * 10}% / ${35 + Math.random() * 10}% ${50 + Math.random() * 15}% ${45 + Math.random() * 15}% ${60 + Math.random() * 10}%`,
+        });
+      }
 
-      setTimeout(() => {
-        setEmbers((prev) =>
-          prev.filter((e) => e.id !== ember.id)
-        );
-      }, ember.duration * 1000);
+      setEmbers((prev) => [...prev, ...nextEmbers]);
 
-    }, 350);
+      nextEmbers.forEach((ember) => {
+        setTimeout(() => {
+          setEmbers((prev) =>
+            prev.filter((e) => e.id !== ember.id)
+          );
+        }, ember.duration * 1000);
+      });
+
+    }, 260);
 
     return () => clearInterval(interval);
 
@@ -61,13 +72,19 @@ export default function EmberParticles() {
             x: 0,
             y: 0,
             opacity: 0,
-            scale: 0.5,
+            scale: 0.4,
+            rotate: 0,
           }}
           animate={{
             x: ember.drift,
-            y: -window.innerHeight,
-            opacity: [0, 1, 0.8, 0],
-            scale: [0.5, 1],
+            y: -window.innerHeight * 0.35,
+            opacity: [0, 0.9, 0.65, 0],
+            scale: [0.4, 0.85, 0.7],
+            rotate: [0, 4, -2, 0],
+            borderRadius: [
+              ember.borderRadius,
+              ember.borderRadius,
+            ],
           }}
           transition={{
             duration: ember.duration,
@@ -75,13 +92,14 @@ export default function EmberParticles() {
           }}
           style={{
             left: `${ember.left}%`,
-            bottom: 0,
-            width: ember.size,
-            height: ember.size,
+            bottom: 20,
+            width: ember.width,
+            height: ember.height,
             background: ember.color,
-            boxShadow: `0 0 ${ember.size * 4}px ${ember.color}`,
+            boxShadow: `0 0 ${ember.width * 3}px ${ember.color}`,
+            filter: "brightness(1.15) blur(0.35px)",
           }}
-          className="absolute rounded-full"
+          className="absolute"
         />
       ))}
 

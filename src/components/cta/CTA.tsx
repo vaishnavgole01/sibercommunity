@@ -52,12 +52,12 @@ export default function CTA() {
           <div
             className="
             relative
-            h-24
-            w-24
+            h-32
+            w-32
             overflow-hidden
             rounded-full
             border
-            border-white/20
+            border-white
             shadow-[0_0_60px_rgba(200,255,58,.18)]
             "
           >
@@ -119,10 +119,6 @@ export default function CTA() {
         </motion.p>
 
         <CTAForm />
-
-        <p className="mt-6 text-sm text-zinc-500">
-          Free forever • No credit card required
-        </p>
 
       </div>
     </section>

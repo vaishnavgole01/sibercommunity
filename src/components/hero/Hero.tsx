@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { motion } from "framer-motion";
 
 import HeroBadge from "./HeroBadge";
@@ -13,21 +12,18 @@ import ScrollIndicator from "./ScrollIndicator";
 
 export default function Hero() {
   return (
-    <section className="relative isolate h-screen min-h-[850px] overflow-hidden bg-[#0c0b0e]">
+    <section className="relative isolate min-h-screen min-h-[850px] overflow-hidden pb-16 bg-[#0c0b0e]">
 
       {/* Background */}
-      <Image
-        src="/branding/volcanic-bg.jpeg"
-        alt="Siber Background"
-        fill
-        priority
-        className="object-cover object-center"
+      <div
+        className="absolute inset-0 z-0 bg-cover bg-top bg-no-repeat"
+        style={{ backgroundImage: 'url("/branding/volcanic-bg.jpeg")' }}
       />
 
       {/* Overlays */}
-      <div className="absolute inset-0 bg-gradient-to-r from-[#0c0b0ef2] via-[#0c0b0ec8] to-[#0c0b0e66]" />
-      <div className="absolute inset-0 bg-gradient-to-t from-[#0c0b0e] via-transparent to-transparent" />
-      <div className="absolute inset-0 bg-gradient-to-b from-[#0c0b0e88] to-transparent" />
+      <div className="absolute inset-0 z-10 bg-gradient-to-r from-[#0c0b0eaa] via-[#0c0b0e66] to-[#0c0b0e22]" />
+      <div className="absolute inset-0 z-10 bg-gradient-to-t from-[#0c0b0e66] via-transparent to-transparent" />
+      <div className="absolute inset-0 z-10 bg-gradient-to-b from-[#0c0b0e33] to-transparent" />
 
       {/* Noise */}
       <div

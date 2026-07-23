@@ -1,10 +1,18 @@
 "use client";
 
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Rocket } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 export default function CTAForm() {
+  const router = useRouter();
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    router.push("/register");
+  }
+
   return (
-    <form className="mx-auto mt-10 flex max-w-xl flex-col gap-4 sm:flex-row">
+    <form onSubmit={handleSubmit} className="mx-auto mt-10 flex max-w-xl flex-col gap-4 sm:flex-row">
 
       <input
         type="email"
@@ -30,6 +38,7 @@ export default function CTAForm() {
       />
 
       <button
+        type="submit"
         className="
         flex
         items-center
@@ -52,10 +61,9 @@ export default function CTAForm() {
         hover:shadow-[0_0_45px_rgba(200,255,58,.45)]
         "
       >
+        <Rocket size={18} className="text-black" />
         Get Started
-
         <ArrowRight size={18} />
-
       </button>
 
     </form>

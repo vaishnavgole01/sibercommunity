@@ -25,7 +25,7 @@ export default function FloatingBlobs() {
         h-[550px]
         w-[550px]
         rounded-full
-        bg-lime-300/15
+        bg-slate-300/10
         blur-[140px]
         "
       />
@@ -50,7 +50,7 @@ export default function FloatingBlobs() {
         h-[480px]
         w-[480px]
         rounded-full
-        bg-pink-400/15
+        bg-slate-400/10
         blur-[130px]
         "
       />
@@ -98,7 +98,7 @@ export default function FloatingBlobs() {
         h-40
         w-40
         rounded-full
-        bg-lime-300/10
+        bg-slate-300/10
         blur-[80px]
         "
       />
