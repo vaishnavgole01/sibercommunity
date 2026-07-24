@@ -126,6 +126,8 @@ export default function RegisterForm() {
 
   return (
     <div className="w-full max-w-[26.5rem] rounded-[28px] border border-white/10 bg-white/5 p-4 backdrop-blur-3xl shadow-[0_20px_80px_rgba(0,0,0,.45)]">
+      <Toast message={toastMessage} visible={toastVisible} />
+
       <span className="rounded-full border border-lime-300/20 bg-lime-300/10 px-3 py-1 text-[10px] uppercase tracking-[0.35em] text-lime-300">
         Join Siber
       </span>
