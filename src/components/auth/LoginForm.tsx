@@ -135,17 +135,14 @@ export default function LoginForm() {
 
       setLoading(true);
 
-     await loginUser(
-  formData.email,
-  formData.password
-);
+      await loginUser(
+        formData.email,
+        formData.password
+      );
 
-const redirectPath =
-  await getRedirectPath();
+      const redirectPath = await getRedirectPath();
 
-router.push(redirectPath);
-
-      router.push("/");
+      router.push(redirectPath);
 
     } catch (err: any) {
 

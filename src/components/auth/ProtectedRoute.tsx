@@ -33,8 +33,8 @@ export default function ProtectedRoute({
     }
 
     if (
-      profile &&
-      !profile.onboarding_completed
+      !profile ||
+      (profile && !profile.onboarding_completed)
     ) {
 
       router.replace("/onboarding");

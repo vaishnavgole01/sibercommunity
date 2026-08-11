@@ -30,33 +30,36 @@ export async function saveOnboarding(
     throw new Error("User not found.");
   }
 
+  const email = user.email;
+  if (!email) {
+    throw new Error("Logged in user must have an email address.");
+  }
+
   // -----------------------------------
-  // Update Profile
+  // Upsert Profile
   // -----------------------------------
 
   const { error: profileError } =
     await supabase
       .from("profiles")
-      .update({
-        gender: formData.gender,
-        dob: formData.dob,
-        role: formData.role,
-
-        projects_completed:
-          formData.projects_completed,
-
-        certifications:
-          formData.certifications,
-
-        leetcode_username:
-          formData.leetcode_username,
-
-        hackerrank_username:
-          formData.hackerrank_username,
-
-        onboarding_completed: true,
-      })
-      .eq("id", user.id);
+      .upsert(
+        {
+          id: user.id,
+          email,
+          full_name: user.user_metadata?.full_name ?? "",
+          gender: formData.gender,
+          dob: formData.dob,
+          role: formData.role,
+          projects_completed: formData.projects_completed,
+          certifications: formData.certifications,
+          leetcode_username: formData.leetcode_username,
+          hackerrank_username: formData.hackerrank_username,
+          onboarding_completed: true,
+        },
+        {
+          onConflict: "id",
+        }
+      );
 
   if (profileError) {
     throw profileError;

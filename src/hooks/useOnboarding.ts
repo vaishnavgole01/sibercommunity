@@ -63,22 +63,39 @@ const nextStep = async () => {
     return;
 
   }
-setError("");
+
+  setError("");
   try {
 
     setLoading(true);
 
     await saveOnboarding(formData);
 
-    router.push("/");
+    router.push("/dashboard");
 
-  } catch (error: any) {
+  } catch (error: unknown) {
 
-  console.error(error);
+    const normalized = error as {
+      message?: string;
+      msg?: string;
+      details?: string;
+    };
+    const message =
+      normalized.message ||
+      normalized.msg ||
+      normalized.details ||
+      (typeof error === "string"
+        ? error
+        : error && typeof error === "object"
+        ? JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
+        : String(error)) ||
+      "An unknown error occurred.";
 
-  alert(error.message);
+    console.error("Onboarding error:", error);
+    setError(message);
+    alert(message);
 
-} finally {
+  } finally {
 
     setLoading(false);
 

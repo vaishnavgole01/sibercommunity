@@ -82,7 +82,7 @@ export async function getRedirectPath() {
   const profile = await getUserProfile();
 
   if (!profile) {
-    return "/login";
+    return "/onboarding";
   }
 
   if (!profile.onboarding_completed) {
