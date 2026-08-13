@@ -40,6 +40,11 @@ create or replace trigger communities_set_updated_at
 before update on public.communities
 for each row execute function public.handle_updated_at();
 
+-- Drop existing policies if they exist (for idempotency)
+drop policy if exists "Users can view communities they belong to or communities they created" on public.communities;
+drop policy if exists "Authenticated users can create communities" on public.communities;
+drop policy if exists "Owners and admins can update communities" on public.communities;
+
 create policy "Users can view communities they belong to or communities they created"
   on public.communities
   for select
@@ -84,7 +89,9 @@ drop policy if exists "Owners and admins can update roles" on public.community_m
 
 drop policy if exists "Authenticated users can view community members" on public.community_members;
 drop policy if exists "Authenticated users can insert community members" on public.community_members;
+drop policy if exists "Owners and admins can insert community members" on public.community_members;
 drop policy if exists "Authenticated users can delete own membership" on public.community_members;
+drop policy if exists "Owners and admins can delete community members" on public.community_members;
 drop policy if exists "Community creators can manage members" on public.community_members;
 
 create policy "Authenticated users can view community members"

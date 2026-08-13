@@ -366,29 +366,61 @@ export async function fetchUserJoinRequestStatuses(communityIds: string[]) {
 }
 
 export async function approveJoinRequest(requestId: string) {
+  // Get current user (must be owner/admin)
+  const {
+    data: { user: currentUser },
+    error: currentUserError,
+  } = await supabase.auth.getUser();
+
+  if (currentUserError || !currentUser) {
+    throw new Error("You must be logged in to approve requests.");
+  }
+
   // fetch request
   const { data: reqData, error: reqErr } = await supabase
     .from("community_join_requests")
-    .select("community_id, user_id")
+    .select("id, community_id, user_id, status")
     .eq("id", requestId)
     .maybeSingle();
 
   if (reqErr || !reqData) {
-    throw new Error(getFriendlyErrorMessage(reqErr?.message || "Request not found"));
+    throw new Error("Join request not found.");
   }
 
-  // insert membership
-  const { data: existingMember, error: existingMemberError } = await supabase
+  // Verify requester is already approved/denied
+  if (reqData.status !== "pending") {
+    throw new Error(`This request has already been ${reqData.status}.`);
+  }
+
+  // Verify current user is owner/admin of the community
+  const { data: adminCheck, error: adminError } = await supabase
     .from("community_members")
-    .select("id")
+    .select("role")
+    .eq("community_id", reqData.community_id)
+    .eq("user_id", currentUser.id)
+    .maybeSingle();
+
+  if (adminError || !adminCheck) {
+    throw new Error("You don't have permission to approve members for this community.");
+  }
+
+  if (!["owner", "admin"].includes(adminCheck.role)) {
+    throw new Error("Only owners and admins can approve join requests.");
+  }
+
+  // Check if user is already a member
+  const { data: existingMember, error: checkError } = await supabase
+    .from("community_members")
+    .select("id, role")
     .eq("community_id", reqData.community_id)
     .eq("user_id", reqData.user_id)
     .maybeSingle();
 
-  if (existingMemberError) {
-    throw new Error(getFriendlyErrorMessage(existingMemberError.message));
+  if (checkError && checkError.code !== "PGRST116") {
+    throw new Error("Failed to verify member status. Please try again.");
   }
 
+  // If not already a member, add them
   if (!existingMember) {
     const { error: memberError } = await supabase.from("community_members").insert({
       community_id: reqData.community_id,
@@ -397,14 +429,19 @@ export async function approveJoinRequest(requestId: string) {
     });
 
     if (memberError) {
-      throw new Error(getFriendlyErrorMessage(memberError.message));
+      console.error("Member insert error:", memberError);
+      throw new Error("Failed to add member to community. Please try again.");
     }
   }
 
-  // update request status
-  const { error: updateErr } = await supabase.from("community_join_requests").update({ status: "approved" }).eq("id", requestId);
+  // Update request status to approved
+  const { error: updateErr } = await supabase
+    .from("community_join_requests")
+    .update({ status: "approved" })
+    .eq("id", requestId);
+
   if (updateErr) {
-    throw new Error(getFriendlyErrorMessage(updateErr.message));
+    throw new Error("Failed to update request status. Please try again.");
   }
 }
 

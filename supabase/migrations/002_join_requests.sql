@@ -11,6 +11,12 @@ create table if not exists public.community_join_requests (
 
 alter table public.community_join_requests enable row level security;
 
+-- Drop existing policies if they exist (for idempotency)
+drop policy if exists "Authenticated users can request to join" on public.community_join_requests;
+drop policy if exists "Admins can select requests for their communities" on public.community_join_requests;
+drop policy if exists "Admins can update request status" on public.community_join_requests;
+drop policy if exists "Users can view their own requests" on public.community_join_requests;
+
 -- allow authenticated users to create a request for themselves
 create policy "Authenticated users can request to join"
   on public.community_join_requests

@@ -85,14 +85,20 @@ export default function AdminPage() {
 
   const handleApprove = async (reqId: string) => {
     setWorking(true);
+    setError("");
     try {
       await approveJoinRequest(reqId);
-      const refreshed = await fetchCommunityMembers(selectedCommunityId);
-      setMembers(refreshed);
-      const reqs = await fetchJoinRequests(selectedCommunityId);
-      setJoinRequests(reqs);
+      // Refresh both members and requests
+      const [refreshedMembers, refreshedReqs] = await Promise.all([
+        fetchCommunityMembers(selectedCommunityId),
+        fetchJoinRequests(selectedCommunityId, "pending"),
+      ]);
+      setMembers(refreshedMembers);
+      setJoinRequests(refreshedReqs);
     } catch (err: any) {
-      setError(err?.message || "Unable to approve request.");
+      const errorMsg = err?.message || "Unable to approve request.";
+      setError(errorMsg);
+      console.error("Approval error:", err);
     } finally {
       setWorking(false);
     }
