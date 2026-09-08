@@ -34,3 +34,17 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## IBM Bob
+
+IBM Bob was used as a development and analysis assistant for this project. It
+helped the team understand the existing architecture, review authentication,
+Supabase, onboarding, and community workflows, identify security
+considerations, and plan improvements using the real project structure.
+
+IBM Bob is not a runtime dependency of the deployed application. See
+[IBM Bob Usage](docs/IBM_BOB_USAGE.md) for the complete workflow and scope.
+
+Team: Vaishnav Gole and Sujal Dalvi.
+
+Repository: https://github.com/vaishnavgole01/sibercommunity
