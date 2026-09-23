@@ -5,17 +5,51 @@ import Link from "next/link";
 import { ArrowLeft, Shield, Trash2 } from "lucide-react";
 import Sidebar from "@/components/dashboard/Sidebar";
 import useAuth from "@/hooks/useAuth";
-import { fetchUserCommunities, fetchCommunityMembers, removeCommunityMember, fetchJoinRequests, approveJoinRequest, denyJoinRequest } from "@/lib/communities";
+import {
+  fetchUserCommunities,
+  fetchCommunityMembers,
+  removeCommunityMember,
+  fetchJoinRequests,
+  approveJoinRequest,
+  denyJoinRequest,
+} from "@/lib/communities";
+
+type AdminCommunity = {
+  id: string;
+  name: string;
+  goal: string;
+  max_members: number;
+  member_role?: "owner" | "admin" | "member";
+};
+
+type AdminMember = {
+  user_id: string;
+  role: "owner" | "admin" | "member";
+  profile?: {
+    full_name?: string | null;
+  } | null;
+};
+
+type JoinRequestRow = {
+  id: string;
+  user_id: string;
+  created_at: string;
+  message?: string | null;
+  label?: string;
+  profile?: {
+    full_name?: string | null;
+  } | null;
+};
 
 export default function AdminPage() {
   const { user } = useAuth();
-  const [communities, setCommunities] = useState<any[]>([]);
+  const [communities, setCommunities] = useState<AdminCommunity[]>([]);
   const [selectedCommunityId, setSelectedCommunityId] = useState<string>("");
-  const [members, setMembers] = useState<any[]>([]);
+  const [members, setMembers] = useState<AdminMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
-  const [joinRequests, setJoinRequests] = useState<any[]>([]);
+  const [joinRequests, setJoinRequests] = useState<JoinRequestRow[]>([]);
 
   useEffect(() => {
     async function load() {
@@ -23,8 +57,10 @@ export default function AdminPage() {
       setLoading(true);
       try {
         const data = await fetchUserCommunities(user.id);
-        const adminOnly = data.filter((community) => community.member_role === "owner" || community.member_role === "admin");
-        setCommunities(adminOnly);
+        const adminOnly = data.filter(
+          (community) => community.member_role === "owner" || community.member_role === "admin"
+        );
+        setCommunities(adminOnly as AdminCommunity[]);
         if (adminOnly[0]) {
           setSelectedCommunityId(adminOnly[0].id);
         }
@@ -32,7 +68,7 @@ export default function AdminPage() {
         setLoading(false);
       }
     }
-    load();
+    void load();
   }, [user?.id]);
 
   useEffect(() => {
@@ -43,12 +79,12 @@ export default function AdminPage() {
       }
       try {
         const data = await fetchCommunityMembers(selectedCommunityId);
-        setMembers(data);
+        setMembers(data as AdminMember[]);
       } catch {
         setMembers([]);
       }
     }
-    loadMembers();
+    void loadMembers();
   }, [selectedCommunityId]);
 
   useEffect(() => {
@@ -58,15 +94,18 @@ export default function AdminPage() {
       }
       try {
         const reqs = await fetchJoinRequests(selectedCommunityId, "pending");
-        setJoinRequests(reqs);
+        setJoinRequests(reqs as JoinRequestRow[]);
       } catch {
         setJoinRequests([]);
       }
     }
-    loadRequests();
+    void loadRequests();
   }, [selectedCommunityId]);
 
-  const selectedCommunity = useMemo(() => communities.find((community) => community.id === selectedCommunityId) || null, [communities, selectedCommunityId]);
+  const selectedCommunity = useMemo(
+    () => communities.find((community) => community.id === selectedCommunityId) || null,
+    [communities, selectedCommunityId]
+  );
 
   const handleRemoveMember = async (memberUserId: string) => {
     if (!selectedCommunityId) return;
@@ -75,9 +114,10 @@ export default function AdminPage() {
     try {
       await removeCommunityMember(selectedCommunityId, memberUserId);
       const refreshed = await fetchCommunityMembers(selectedCommunityId);
-      setMembers(refreshed);
-    } catch (err: any) {
-      setError(err?.message || "Unable to remove member.");
+      setMembers(refreshed as AdminMember[]);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unable to remove member.";
+      setError(message);
     } finally {
       setWorking(false);
     }
@@ -88,17 +128,16 @@ export default function AdminPage() {
     setError("");
     try {
       await approveJoinRequest(reqId);
-      // Refresh both members and requests
       const [refreshedMembers, refreshedReqs] = await Promise.all([
         fetchCommunityMembers(selectedCommunityId),
         fetchJoinRequests(selectedCommunityId, "pending"),
       ]);
-      setMembers(refreshedMembers);
-      setJoinRequests(refreshedReqs);
-    } catch (err: any) {
-      const errorMsg = err?.message || "Unable to approve request.";
-      setError(errorMsg);
-      console.error("Approval error:", err);
+      setMembers(refreshedMembers as AdminMember[]);
+      setJoinRequests(refreshedReqs as JoinRequestRow[]);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unable to approve request.";
+      setError(message);
+      console.error("Approval error:", error);
     } finally {
       setWorking(false);
     }
@@ -109,9 +148,10 @@ export default function AdminPage() {
     try {
       await denyJoinRequest(reqId);
       const reqs = await fetchJoinRequests(selectedCommunityId);
-      setJoinRequests(reqs);
-    } catch (err: any) {
-      setError(err?.message || "Unable to deny request.");
+      setJoinRequests(reqs as JoinRequestRow[]);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unable to deny request.";
+      setError(message);
     } finally {
       setWorking(false);
     }

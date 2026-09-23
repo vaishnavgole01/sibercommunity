@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { saveOnboarding } from "@/lib/onboarding";
+import { useAuthContext } from "@/context/AuthContext";
 
 export interface OnboardingData {
   gender: string;
@@ -42,6 +43,7 @@ export default function useOnboarding() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
+  const { refreshUser } = useAuthContext();
 
   const [formData, setFormData] =
     useState<OnboardingData>(initialState);
@@ -70,6 +72,8 @@ const nextStep = async () => {
     setLoading(true);
 
     await saveOnboarding(formData);
+
+    await refreshUser();
 
     router.push("/dashboard");
 

@@ -2,14 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Shield, Users, Crown, Settings } from "lucide-react";
+import { Shield, Users } from "lucide-react";
 import Sidebar from "@/components/dashboard/Sidebar";
 import useAuth from "@/hooks/useAuth";
 import { fetchUserCommunities } from "@/lib/communities";
 
 export default function ProfilePage() {
   const { user, profile } = useAuth();
-  const [communities, setCommunities] = useState<any[]>([]);
+  const [communities, setCommunities] = useState<{ id: string; name: string; goal: string; member_role: "owner" | "admin" | "member" }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -18,17 +18,21 @@ export default function ProfilePage() {
       setLoading(true);
       try {
         const data = await fetchUserCommunities(user.id);
-        setCommunities(data);
+        setCommunities(data as { id: string; name: string; goal: string; member_role: "owner" | "admin" | "member" }[]);
       } finally {
         setLoading(false);
       }
     }
-    load();
+    void load();
   }, [user?.id]);
 
-  const fullName = profile?.full_name || user?.user_metadata?.full_name || user?.email?.split("@")[0] || "Siber User";
-  const adminCommunities = useMemo(() => communities.filter((community) => community.member_role === "owner" || community.member_role === "admin"), [communities]);
-  const joinedCommunities = useMemo(() => communities.filter((community) => community.member_role !== "owner" && community.member_role !== "admin"), [communities]);
+  const fullName = String(
+    profile?.full_name ?? user?.user_metadata?.full_name ?? user?.email?.split("@")[0] ?? "Siber User"
+  );
+  const adminCommunities = useMemo(
+    () => communities.filter((community) => community.member_role === "owner" || community.member_role === "admin"),
+    [communities]
+  );
 
   return (
     <div className="min-h-screen bg-[#09080c] text-white">

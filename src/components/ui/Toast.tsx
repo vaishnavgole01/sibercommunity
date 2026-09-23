@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 type ToastProps = {
@@ -9,13 +8,7 @@ type ToastProps = {
 };
 
 export default function Toast({ message, visible }: ToastProps) {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!visible || !message || !mounted) {
+  if (!visible || !message || typeof document === "undefined") {
     return null;
   }
 

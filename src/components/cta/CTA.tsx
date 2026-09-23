@@ -115,7 +115,7 @@ export default function CTA() {
           No algorithms.
           No noise.
           Just communities that feel like somewhere
-          you'd actually want to be.
+          you&apos;d actually want to be.
         </motion.p>
 
         <CTAForm />

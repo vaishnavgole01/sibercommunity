@@ -31,14 +31,15 @@ export default function DashboardPage() {
         setLoading(true);
         const homePosts = await fetchHomePosts();
         setPosts(homePosts);
-      } catch (err: any) {
-        setError(err?.message || "Unable to load posts.");
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : "Unable to load posts.";
+        setError(message);
       } finally {
         setLoading(false);
       }
     }
 
-    loadHome();
+    void loadHome();
   }, []);
 
   return (

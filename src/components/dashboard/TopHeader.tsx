@@ -1,26 +1,22 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Search, Plus, MessageCircle, Bell, UserCircle } from "lucide-react";
-import Toast from "@/components/ui/Toast";
+import { Search, Plus, MessageCircle, UserCircle } from "lucide-react";
 import useAuth from "@/hooks/useAuth";
 import CommunitySearch from "@/components/community/CommunitySearch";
+import NotificationsDropdown from "@/components/dashboard/NotificationsDropdown";
 
 export default function TopHeader() {
   const { user, profile } = useAuth();
   const [search, setSearch] = useState("");
   const [showInlineSearch, setShowInlineSearch] = useState(false);
-  const [toastMessage, setToastMessage] = useState("");
-  const [toastVisible, setToastVisible] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const fullName =
-    profile?.full_name ||
-    user?.user_metadata?.full_name ||
-    user?.email?.split("@")[0] ||
-    "Siber User";
+  const fullName = String(
+    profile?.full_name ?? user?.user_metadata?.full_name ?? user?.email?.split("@")[0] ?? "Siber User"
+  );
 
-  const userInitials = fullName
+  const userInitials = String(fullName)
     .split(" ")
     .slice(0, 2)
     .map((part: string) => part.charAt(0))
@@ -40,7 +36,6 @@ export default function TopHeader() {
 
   return (
     <div className="mb-10 flex flex-col gap-6 rounded-[32px] border border-white/10 bg-[#0f0e14]/90 p-6 shadow-[0_30px_60px_rgba(0,0,0,.35)]">
-      <Toast message={toastMessage} visible={toastVisible} />
       <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
         <div>
           <p className="text-sm uppercase tracking-[0.35em] text-zinc-500">Welcome back</p>
@@ -90,9 +85,7 @@ export default function TopHeader() {
         <button className="flex items-center gap-2 rounded-2xl border border-white/10 bg-[#111118] px-4 py-3 text-sm font-semibold text-white transition hover:border-red-500/30">
           <MessageCircle size={18} /> Messages
         </button>
-        <button className="flex items-center gap-2 rounded-2xl border border-white/10 bg-[#111118] px-4 py-3 text-sm font-semibold text-white transition hover:border-red-500/30">
-          <Bell size={18} /> Notifications
-        </button>
+        <NotificationsDropdown />
         <button className="flex items-center gap-2 rounded-2xl border border-white/10 bg-[#111118] px-4 py-3 text-sm font-semibold text-white transition hover:border-red-500/30">
           <UserCircle size={18} /> {userInitials}
         </button>

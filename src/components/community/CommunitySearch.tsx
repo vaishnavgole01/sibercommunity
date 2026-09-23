@@ -32,8 +32,9 @@ export default function CommunitySearch({ initialQuery = "" }: { initialQuery?: 
         const res = await searchCommunities(query);
         if (!mounted) return;
         setResults(res as Community[]);
-      } catch (e: any) {
-        setError(e?.message || String(e));
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        setError(message);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -66,7 +67,7 @@ export default function CommunitySearch({ initialQuery = "" }: { initialQuery?: 
       }
     }
 
-    loadStatuses();
+    void loadStatuses();
 
     return () => {
       mounted = false;
@@ -104,8 +105,9 @@ export default function CommunitySearch({ initialQuery = "" }: { initialQuery?: 
                       await joinCommunity(c.id);
                       alert("Join request sent. Community admins will review and approve.");
                       setRequestStatuses((prev) => ({ ...prev, [c.id]: "pending" }));
-                    } catch (e: any) {
-                      alert(e?.message || String(e));
+                    } catch (error: unknown) {
+                      const message = error instanceof Error ? error.message : String(error);
+                      alert(message);
                     }
                   }}
                 >

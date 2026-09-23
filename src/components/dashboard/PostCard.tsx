@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { MessageCircle, Heart, Bookmark, Share2, MoreHorizontal } from "lucide-react";
 
 interface PostCardProps {
@@ -56,7 +57,7 @@ export default function PostCard({
 
       {imageUrl ? (
         <div className="mt-6 overflow-hidden rounded-3xl border border-white/10 bg-[#0d0c12]">
-          <img src={imageUrl} alt="Post attachment" className="h-full w-full object-cover" />
+          <Image src={imageUrl} alt="Post attachment" width={1200} height={700} className="h-full w-full object-cover" />
         </div>
       ) : null}
 
@@ -75,7 +76,10 @@ export default function PostCard({
           <button className="rounded-2xl bg-white/5 p-3 text-zinc-300 transition hover:bg-white/10">
             <Share2 size={16} />
           </button>
-          <button className="rounded-2xl bg-white/5 p-3 text-zinc-300 transition hover:bg-white/10">
+          <button
+            className={`rounded-2xl p-3 transition ${bookmarked ? "bg-red-500/15 text-red-300" : "bg-white/5 text-zinc-300 hover:bg-white/10"}`}
+            aria-label={bookmarked ? "Remove bookmark" : "Save post"}
+          >
             <Bookmark size={16} />
           </button>
         </div>

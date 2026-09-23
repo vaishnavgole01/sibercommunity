@@ -3,18 +3,45 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Users, Crown, Shield, UserPlus, LogOut } from "lucide-react";
+import { ArrowLeft, Users, Crown, Shield, UserPlus, LogOut, MessageSquare, Trash2 } from "lucide-react";
 import useAuth from "@/hooks/useAuth";
 import Sidebar from "@/components/dashboard/Sidebar";
-import { fetchCommunityById, fetchCommunityMembers, fetchJoinRequestStatus, joinCommunity, leaveCommunity } from "@/lib/communities";
+import {
+  fetchCommunityById,
+  fetchCommunityMembers,
+  fetchJoinRequestStatus,
+  joinCommunity,
+  leaveCommunity,
+  deleteCommunity,
+} from "@/lib/communities";
+
+type CommunityDetail = {
+  id: string;
+  name: string;
+  description?: string | null;
+  goal: string;
+  max_members: number;
+  created_by: string;
+  created_by_profile?: {
+    full_name?: string | null;
+  } | null;
+};
+
+type CommunityMember = {
+  user_id: string;
+  role: "owner" | "admin" | "member";
+  profile?: {
+    full_name?: string | null;
+  } | null;
+};
 
 export default function CommunityDetailPage({ params }: { params: Promise<{ communityId: string }> }) {
   const router = useRouter();
-  const routeParams = useParams();
+  const routeParams = useParams<{ communityId?: string }>();
   const { user } = useAuth();
   const [communityId, setCommunityId] = useState<string>("");
-  const [community, setCommunity] = useState<any>(null);
-  const [members, setMembers] = useState<any[]>([]);
+  const [community, setCommunity] = useState<CommunityDetail | null>(null);
+  const [members, setMembers] = useState<CommunityMember[]>([]);
   const [requestStatus, setRequestStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
@@ -24,9 +51,10 @@ export default function CommunityDetailPage({ params }: { params: Promise<{ comm
     let mounted = true;
     async function init() {
       const resolvedParams = await params;
-      const id = resolvedParams.communityId || (routeParams as any)?.communityId;
+      const id = resolvedParams.communityId || routeParams.communityId;
       if (!id) return;
       if (mounted) setCommunityId(id);
+
       try {
         setLoading(true);
         const [communityData, membersData, requestStatusData] = await Promise.all([
@@ -35,24 +63,29 @@ export default function CommunityDetailPage({ params }: { params: Promise<{ comm
           fetchJoinRequestStatus(id),
         ]);
         if (mounted) {
-          setCommunity(communityData);
-          setMembers(membersData);
+          setCommunity(communityData as CommunityDetail | null);
+          setMembers(membersData as CommunityMember[]);
           setRequestStatus(requestStatusData);
         }
-      } catch (err: any) {
-        if (mounted) setError(err?.message || "Unable to load community.");
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : "Unable to load community.";
+        if (mounted) setError(message);
       } finally {
         if (mounted) setLoading(false);
       }
     }
-    init();
+
+    void init();
     return () => {
       mounted = false;
     };
   }, [params, routeParams]);
 
   const memberCount = members.length;
-  const currentUserMembership = useMemo(() => members.find((member) => member.user_id === user?.id), [members, user]);
+  const currentUserMembership = useMemo(
+    () => members.find((member) => member.user_id === user?.id) ?? null,
+    [members, user]
+  );
 
   const handleJoin = async () => {
     if (!communityId) return;
@@ -62,8 +95,9 @@ export default function CommunityDetailPage({ params }: { params: Promise<{ comm
       await joinCommunity(communityId);
       setRequestStatus("pending");
       setError("Join request submitted. Admins will review it soon.");
-    } catch (err: any) {
-      setError(err?.message || "Unable to request to join this community.");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unable to request to join this community.";
+      setError(message);
     } finally {
       setJoining(false);
     }
@@ -75,13 +109,33 @@ export default function CommunityDetailPage({ params }: { params: Promise<{ comm
     try {
       await leaveCommunity(communityId);
       const refreshedMembers = await fetchCommunityMembers(communityId);
-      setMembers(refreshedMembers);
-    } catch (err: any) {
-      setError(err?.message || "Unable to leave community.");
+      setMembers(refreshedMembers as CommunityMember[]);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unable to leave community.";
+      setError(message);
     } finally {
       setJoining(false);
     }
   };
+
+  const handleDelete = async () => {
+    if (!communityId) return;
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete "${community?.name}"? This cannot be undone.`
+    );
+    if (!confirmed) return;
+    setJoining(true);
+    try {
+      await deleteCommunity(communityId);
+      router.push("/dashboard");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unable to delete community.";
+      setError(message);
+      setJoining(false);
+    }
+  };
+
+  const isOwner = currentUserMembership?.role === "owner";
 
   if (loading) {
     return (
@@ -122,9 +176,15 @@ export default function CommunityDetailPage({ params }: { params: Promise<{ comm
               </div>
               <div className="flex flex-wrap gap-3">
                 {currentUserMembership ? (
-                  <button type="button" disabled={joining} onClick={handleLeave} className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10 disabled:opacity-70">
-                    <span className="inline-flex items-center gap-2"><LogOut size={16} /> Leave</span>
-                  </button>
+                  isOwner ? (
+                    <button type="button" disabled={joining} onClick={handleDelete} className="rounded-full border border-red-500/40 bg-red-500/10 px-5 py-3 text-sm font-semibold text-red-400 transition hover:bg-red-500/20 disabled:opacity-70">
+                      <span className="inline-flex items-center gap-2"><Trash2 size={16} /> Delete Community</span>
+                    </button>
+                  ) : (
+                    <button type="button" disabled={joining} onClick={handleLeave} className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10 disabled:opacity-70">
+                      <span className="inline-flex items-center gap-2"><LogOut size={16} /> Leave</span>
+                    </button>
+                  )
                 ) : requestStatus ? (
                   <button type="button" disabled className="rounded-full bg-zinc-700 px-5 py-3 text-sm font-semibold text-white">
                     <span className="inline-flex items-center gap-2"><UserPlus size={16} /> {requestStatus === "pending" ? "Pending approval" : requestStatus === "approved" ? "Approved" : "Request denied"}</span>
@@ -157,7 +217,19 @@ export default function CommunityDetailPage({ params }: { params: Promise<{ comm
                   <p className="mt-2 font-semibold text-white">{community.created_by_profile?.full_name || community.created_by}</p>
                 </div>
               </div>
+
+              {/* Open Chat CTA */}
+              {currentUserMembership ? (
+                <button
+                  type="button"
+                  onClick={() => router.push(`/community/${community.id}/chat`)}
+                  className="mt-8 inline-flex items-center gap-2 rounded-full bg-red-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-red-400"
+                >
+                  <MessageSquare size={16} /> Open Community Chat
+                </button>
+              ) : null}
             </div>
+
             <div className="rounded-[32px] border border-white/10 bg-[#0f0e14]/90 p-8">
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-zinc-500">Members</p>
               <div className="mt-6 space-y-3">

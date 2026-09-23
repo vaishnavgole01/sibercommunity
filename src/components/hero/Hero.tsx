@@ -68,7 +68,7 @@ export default function Hero() {
               transition={{ delay: .2 }}
               className="mt-8 max-w-2xl text-lg leading-9 text-zinc-300"
             >
-              Siber is a real-time, interest-driven home for the internet's
+              Siber is a real-time, interest-driven home for the internet&apos;s
               most curious minds. Discover spaces that match your rhythm,
               join conversations the moment they spark and build knowledge
               with people who actually get it.

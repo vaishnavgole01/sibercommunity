@@ -33,6 +33,20 @@ export interface CommunityMemberView {
   } | null;
 }
 
+type CommunityProfileSummary = {
+  id: string;
+  full_name?: string | null;
+  email?: string | null;
+};
+
+type JoinRequestRow = {
+  id: string;
+  user_id: string;
+  message?: string | null;
+  status: string;
+  created_at: string;
+};
+
 export async function createCommunity(input: {
   name: string;
   goal: string;
@@ -61,6 +75,9 @@ export async function createCommunity(input: {
     .single();
 
   if (error) {
+    if (error.code === "23505") {
+      throw new Error(`A community named "${input.name.trim()}" already exists. Please choose a different name.`);
+    }
     throw new Error(getSupabaseErrorDebugMessage(error));
   }
 
@@ -167,10 +184,12 @@ export async function fetchCommunityById(communityId: string) {
       .maybeSingle();
 
     if (!profileError && profileData) {
-      // attach as created_by_profile for convenience
-      (data as any).created_by_profile = profileData;
+      return {
+        ...data,
+        created_by_profile: profileData,
+      } as CommunityRecord & { created_by_profile?: CommunityProfileSummary | null };
     }
-  } catch (e) {
+  } catch {
     // ignore profile fetch errors (RLS may prevent access)
   }
 
@@ -189,7 +208,7 @@ export async function fetchCommunityMembers(communityId: string): Promise<Commun
   }
 
   const userIds = (data ?? []).map((item) => item.user_id);
-  let profilesById = new Map<string, { id: string; full_name?: string | null; email?: string | null }>();
+  let profilesById = new Map<string, CommunityProfileSummary>();
 
   if (userIds.length) {
     const { data: profilesData, error: profilesError } = await supabase
@@ -198,7 +217,7 @@ export async function fetchCommunityMembers(communityId: string): Promise<Commun
       .in("id", userIds);
 
     if (!profilesError) {
-      profilesById = new Map((profilesData ?? []).map((profile: any) => [profile.id, profile]));
+      profilesById = new Map((profilesData ?? []).map((profile: CommunityProfileSummary) => [profile.id, profile]));
     }
   }
 
@@ -285,10 +304,10 @@ export async function fetchJoinRequests(communityId: string, status: string = "p
     throw new Error(getFriendlyErrorMessage(error.message));
   }
 
-  const requests = (data ?? []) as Array<{ id: string; user_id: string; message?: string | null; status: string; created_at: string }>;
+  const requests = (data ?? []) as JoinRequestRow[];
 
   const userIds = Array.from(new Set(requests.map((r) => r.user_id)));
-  let profilesById = new Map<string, { id: string; full_name?: string | null; email?: string | null }>();
+  let profilesById = new Map<string, CommunityProfileSummary>();
 
   if (userIds.length) {
     const { data: profilesData, error: profilesError } = await supabase
@@ -297,7 +316,7 @@ export async function fetchJoinRequests(communityId: string, status: string = "p
       .in("id", userIds);
 
     if (!profilesError) {
-      profilesById = new Map((profilesData ?? []).map((p: any) => [p.id, p]));
+      profilesById = new Map((profilesData ?? []).map((profile: CommunityProfileSummary) => [profile.id, profile]));
     }
   }
 
@@ -359,10 +378,10 @@ export async function fetchUserJoinRequestStatuses(communityIds: string[]) {
     throw new Error(getFriendlyErrorMessage(error.message));
   }
 
-  return (data ?? []).reduce((acc: Record<string, string>, item: any) => {
+  return (data ?? []).reduce<Record<string, string>>((acc, item: { community_id: string; status: string }) => {
     acc[item.community_id] = item.status;
     return acc;
-  }, {} as Record<string, string>);
+  }, {});
 }
 
 export async function approveJoinRequest(requestId: string) {
@@ -505,6 +524,33 @@ export async function updateCommunity(communityId: string, updates: Partial<Pick
   }
 }
 
+export async function deleteCommunity(communityId: string) {
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    throw new Error("Please sign in to delete this community.");
+  }
+
+  const { error, count } = await supabase
+    .from("communities")
+    .delete({ count: "exact" })
+    .eq("id", communityId)
+    .eq("created_by", user.id);
+
+  if (error) {
+    throw new Error(getFriendlyErrorMessage(error.message));
+  }
+
+  if (count === 0) {
+    throw new Error(
+      "Community could not be deleted. Make sure you are the owner and the delete policy is enabled in Supabase."
+    );
+  }
+}
+
 function getSupabaseErrorDebugMessage(error: {
   message?: string;
   details?: string | null;
@@ -527,6 +573,10 @@ function getSupabaseErrorDebugMessage(error: {
 function getFriendlyErrorMessage(message: string) {
   if (!message) {
     return "Something went wrong. Please try again.";
+  }
+
+  if (message.toLowerCase().includes("duplicate key") || message.toLowerCase().includes("unique constraint")) {
+    return "A community with that name already exists. Please choose a different name.";
   }
 
   if (message.toLowerCase().includes("community is full")) {

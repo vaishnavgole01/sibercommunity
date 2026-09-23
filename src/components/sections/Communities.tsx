@@ -93,7 +93,7 @@ export default function Communities() {
               <>
                 A taste of{" "}
                 <span className="italic text-lime-300">
-                  what's growing.
+                  what&apos;s growing.
                 </span>
               </>
             }

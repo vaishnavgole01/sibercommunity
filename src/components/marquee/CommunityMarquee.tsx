@@ -22,7 +22,7 @@ export default function CommunityMarquee() {
       <div className="mx-auto mb-8 max-w-7xl px-6">
 
         <p className="text-center text-xs uppercase tracking-[0.35em] text-zinc-500">
-          A snapshot of what's happening on Siber right now
+          A snapshot of what&apos;s happening on Siber right now
         </p>
 
       </div>

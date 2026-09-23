@@ -32,10 +32,7 @@ export default function ProtectedRoute({
 
     }
 
-    if (
-      !profile ||
-      (profile && !profile.onboarding_completed)
-    ) {
+    if (profile && !profile.onboarding_completed) {
 
       router.replace("/onboarding");
       return;
@@ -91,14 +88,12 @@ export default function ProtectedRoute({
 
   }
 
-  if (
-    !user ||
-    (profile &&
-      !profile.onboarding_completed)
-  ) {
-
+  if (!user) {
     return null;
+  }
 
+  if (profile && !profile.onboarding_completed) {
+    return null;
   }
 
   return <>{children}</>;

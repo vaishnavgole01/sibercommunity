@@ -28,7 +28,7 @@ function getAvatarInitials(name: string) {
 
 export default function Sidebar() {
   const { user, profile } = useAuth();
-  const [communities, setCommunities] = useState<any[]>([]);
+  const [communities, setCommunities] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {
     async function loadCommunities() {
@@ -39,31 +39,26 @@ export default function Sidebar() {
 
       try {
         const data = await fetchUserCommunities(user.id);
-        setCommunities(data);
+        setCommunities(data as { id: string; name: string }[]);
       } catch {
         setCommunities([]);
       }
     }
 
-    loadCommunities();
+    void loadCommunities();
   }, [user?.id]);
 
-  const fullName =
-    profile?.full_name ||
-    user?.user_metadata?.full_name ||
-    user?.email?.split("@")[0] ||
-    "Siber User";
+  const fullName = String(
+    profile?.full_name ??
+      user?.user_metadata?.full_name ??
+      user?.email?.split("@")[0] ??
+      "Siber User"
+  );
 
-  const username =
-    profile?.full_name
-      ? profile.full_name
-          .toLowerCase()
-          .replace(/\s+/g, "")
-          .slice(0, 12)
-      : fullName
-          .toLowerCase()
-          .replace(/\s+/g, "")
-          .slice(0, 12);
+  const username = String(fullName)
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .slice(0, 12);
 
   return (
     <aside className="sticky top-6 hidden h-[calc(100vh-48px)] min-h-[720px] w-80 shrink-0 overflow-hidden rounded-[32px] border border-white/10 bg-[#0d0c12]/90 p-6 shadow-[0_30px_60px_rgba(0,0,0,.35)] xl:block">

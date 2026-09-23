@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { createCommunity } from "@/lib/communities";
@@ -38,30 +38,40 @@ export default function CreateCommunityModal({ open, onClose, onCreated }: Props
   const [customMaxMembers, setCustomMaxMembers] = useState("25");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState<{ message: string; visible: boolean }>({ message: "", visible: false });
+  const [toast, setToast] = useState<{ message: string; visible: boolean }>({
+    message: "",
+    visible: false,
+  });
 
-  useEffect(() => {
-    if (!open) {
-      setStep(1);
-      setName("");
-      setGoal("");
-      setCustomGoal("");
-      setDescription("");
-      setMaxMembers(25);
-      setCustomMaxMembers("25");
-      setErrors({});
-      setLoading(false);
-    }
-  }, [open]);
+  const resetForm = () => {
+    setStep(1);
+    setName("");
+    setGoal("");
+    setCustomGoal("");
+    setDescription("");
+    setMaxMembers(25);
+    setCustomMaxMembers("25");
+    setErrors({});
+    setLoading(false);
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
+  };
 
   const selectedGoal = goal === "Other" ? customGoal.trim() : goal;
   const resolvedMaxMembers = maxMembers === "custom" ? Number(customMaxMembers) : Number(maxMembers);
 
-  const summary = useMemo(() => ({
-    name: name.trim() || "Untitled community",
-    goal: selectedGoal || "Not set",
-    maxMembers: Number.isFinite(resolvedMaxMembers) && resolvedMaxMembers > 0 ? resolvedMaxMembers : "Custom",
-  }), [name, selectedGoal, resolvedMaxMembers]);
+  const summary = useMemo(
+    () => ({
+      name: name.trim() || "Untitled community",
+      goal: selectedGoal || "Not set",
+      maxMembers:
+        Number.isFinite(resolvedMaxMembers) && resolvedMaxMembers > 0 ? resolvedMaxMembers : "Custom",
+    }),
+    [name, selectedGoal, resolvedMaxMembers]
+  );
 
   const validateStepOne = () => {
     const nextErrors: Record<string, string> = {};
@@ -100,10 +110,11 @@ export default function CreateCommunityModal({ open, onClose, onCreated }: Props
         setToast({ message: "", visible: false });
       }, 3200);
       onCreated?.(community.id);
-      onClose();
+      handleClose();
       router.push(`/community/${community.id}`);
-    } catch (err: any) {
-      setErrors({ submit: err?.message || "Unable to create the community." });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unable to create the community.";
+      setErrors({ submit: message });
     } finally {
       setLoading(false);
     }
@@ -120,7 +131,7 @@ export default function CreateCommunityModal({ open, onClose, onCreated }: Props
             <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">Create community</p>
             <h2 className="mt-2 text-2xl font-black text-white">{step === 1 ? "Community information" : "Community settings"}</h2>
           </div>
-          <button type="button" onClick={onClose} className="rounded-full border border-white/10 bg-white/5 p-2 text-zinc-300 transition hover:text-white">
+          <button type="button" onClick={handleClose} className="rounded-full border border-white/10 bg-white/5 p-2 text-zinc-300 transition hover:text-white">
             <X size={18} />
           </button>
         </div>
@@ -220,7 +231,7 @@ export default function CreateCommunityModal({ open, onClose, onCreated }: Props
               Back
             </button>
           ) : (
-            <button type="button" onClick={onClose} className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">
+            <button type="button" onClick={handleClose} className="rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-zinc-200 transition hover:bg-white/10">
               Cancel
             </button>
           )}

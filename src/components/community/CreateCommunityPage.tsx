@@ -90,9 +90,13 @@ export default function CreateCommunityPage({ onCancel }: Props) {
       setToast({ message: "Community created successfully.", visible: true });
       setTimeout(() => setToast({ message: "", visible: false }), 3000);
       router.push(`/community/${community.id}`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Community creation failed:", error);
-      setErrors({ submit: error?.message ? String(error.message) : JSON.stringify(error, null, 2) || "Something went wrong. Please try again." });
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Something went wrong. Please try again.";
+      setErrors({ submit: message });
     } finally {
       setLoading(false);
     }

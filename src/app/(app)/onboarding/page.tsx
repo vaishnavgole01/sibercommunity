@@ -48,7 +48,7 @@ const {
         </h1>
 
         <p className="mt-6 text-lg leading-8 text-zinc-400">
-          Let's personalize your experience.
+          Let&apos;s personalize your experience.
         </p>
 
       </div>

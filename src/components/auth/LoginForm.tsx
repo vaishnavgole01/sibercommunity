@@ -144,12 +144,9 @@ export default function LoginForm() {
 
       router.push(redirectPath);
 
-    } catch (err: any) {
-
-      setError(
-        err.message || "Login failed."
-      );
-
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Login failed.";
+      setError(message);
     } finally {
 
       setLoading(false);

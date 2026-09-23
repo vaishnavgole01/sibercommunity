@@ -81,7 +81,7 @@ export default function Testimonials() {
               <GlassCard className="h-full p-8">
 
                 <p className="text-2xl italic leading-10 text-white">
-                  "{item.quote}"
+                  “{item.quote}”
                 </p>
 
                 <div className="mt-10 flex items-center gap-4">
