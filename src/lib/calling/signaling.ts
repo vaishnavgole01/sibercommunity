@@ -83,8 +83,10 @@ export function waitForChannelReady(
 
     channel.subscribe((status) => {
       console.info("[CALL TRACE] signaling subscription status", {
-        channel: label,
+        channelName: channel.topic,
+        label,
         status,
+        subscribed: status === "SUBSCRIBED",
       });
       if (status === "SUBSCRIBED") {
         clearTimeout(timer);
@@ -143,6 +145,12 @@ export function subscribeToSignaling(
   handlers: Partial<Record<SignalType, SignalHandler>>
 ): { channel: RealtimeChannel; ready: Promise<void>; unsubscribe: () => void } {
   const name = signalChannelName(communityId, localUserId, remoteUserId);
+  console.info("[CALL TRACE] signaling channel created", {
+    communityId,
+    localUserId,
+    remoteUserId,
+    channelName: name,
+  });
 
   let ch = supabase.channel(name);
 
@@ -165,12 +173,61 @@ export function subscribeToSignaling(
       "broadcast",
       { event: eventType },
       ({ payload }: { payload: unknown }) => {
-        const msg = payload as SignalMessage;
-        if (!isValidSignal(msg)) return;
+        const rawMessage = payload as unknown;
+        if (
+          eventType === "call_accept" &&
+          rawMessage &&
+          typeof rawMessage === "object"
+        ) {
+          const raw = rawMessage as Record<string, unknown>;
+          console.info("[CALL TRACE] call_accept broadcast observed", {
+            channelName: name,
+            eventName: eventType,
+            callId: raw.call_id,
+            localUserId,
+            remoteUserId,
+            senderId: raw.sender_id,
+            receiverId: raw.receiver_id,
+          });
+        }
+        if (!isValidSignal(rawMessage)) {
+          if (eventType === "call_accept") {
+            console.warn("[CALL TRACE] call_accept broadcast rejected: invalid payload", {
+              channelName: name,
+              eventName: eventType,
+            });
+          }
+          return;
+        }
+        const msg = rawMessage;
         // Message must come from the expected remote peer
-        if (msg.sender_id !== remoteUserId) return;
+        if (msg.sender_id !== remoteUserId) {
+          if (eventType === "call_accept") {
+            console.warn("[CALL TRACE] call_accept broadcast rejected: unexpected sender", {
+              channelName: name,
+              expectedSenderId: remoteUserId,
+              actualSenderId: msg.sender_id,
+            });
+          }
+          return;
+        }
         // Message must be addressed to the local user
-        if (msg.receiver_id !== localUserId) return;
+        if (msg.receiver_id !== localUserId) {
+          if (eventType === "call_accept") {
+            console.warn("[CALL TRACE] call_accept broadcast rejected: unexpected receiver", {
+              channelName: name,
+              expectedReceiverId: localUserId,
+              actualReceiverId: msg.receiver_id,
+            });
+          }
+          return;
+        }
+        if (eventType === "call_accept") {
+          console.info("[CALL TRACE] call_accept broadcast dispatching", {
+            channelName: name,
+            callId: msg.call_id,
+          });
+        }
         handler(msg);
       }
     );

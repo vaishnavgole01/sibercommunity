@@ -117,6 +117,7 @@ export function useCallingState({
   const callerNotifyChannelRef = useRef<RealtimeChannel | null>(null);
 
   const signalChannelRef = useRef<RealtimeChannel | null>(null);
+  const signalChannelReadyRef = useRef(false);
 
   // Timers
   const ringTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -233,6 +234,7 @@ export function useCallingState({
       void supabase.removeChannel(signalChannelRef.current);
       signalChannelRef.current = null;
     }
+    signalChannelReadyRef.current = false;
 
     // Remove the temporary caller-side outbound notify channel (if any).
     // This is the channel opened to the callee's topic in startCall() and
@@ -500,8 +502,16 @@ export function useCallingState({
           },
 
           call_accept: (msg) => {
+            console.info("[CALL TRACE] caller call_accept received", {
+              callId: msg.call_id,
+              callerId: session.callerId,
+              receiverId: session.calleeId,
+              channelName: signalChannelRef.current?.topic ?? null,
+              subscribedWhenWaiting: signalChannelReadyRef.current,
+              eventName: msg.type,
+              status: statusRef.current,
+            });
             if (isDuplicate(msg)) return;
-            console.info("[CALL TRACE] call_accept received", { callId: msg.call_id });
             if (msg.call_id !== sessionRef.current?.callId || statusRef.current !== "OUTGOING_RING") return;
             clearRingTimer();
             transition("CONNECTING");
@@ -607,12 +617,24 @@ export function useCallingState({
       );
 
       signalChannelRef.current = channel;
+      signalChannelReadyRef.current = false;
       console.info("[CALL TRACE] signaling channel created", {
         callId: session.callId,
+        callerId: session.callerId,
+        receiverId: session.calleeId,
+        channelName: channel.topic,
         remoteId,
       });
 
       await ready;
+      signalChannelReadyRef.current = true;
+      console.info("[CALL TRACE] call signaling channel ready", {
+        callId: session.callId,
+        callerId: session.callerId,
+        receiverId: session.calleeId,
+        channelName: channel.topic,
+        subscriptionStatus: "SUBSCRIBED",
+      });
     },
     [currentUserId, isDuplicate, clearRingTimer, transition, cleanupAll, handleConnectionFailure, startIceTimer]
   );
@@ -717,6 +739,14 @@ export function useCallingState({
         payload: { call_type: callType, caller_name: currentUserName },
       };
       transition("OUTGOING_RING", `Calling ${targetMember.display_name}…`);
+      console.info("[CALL TRACE] caller waiting for call_accept", {
+        callId,
+        callerId: currentUserId,
+        receiverId: targetUserId,
+        channelName: signalChannelRef.current?.topic ?? null,
+        subscriptionStatus: signalChannelReadyRef.current ? "SUBSCRIBED" : "NOT_SUBSCRIBED",
+        eventName: "call_accept",
+      });
       console.info("[CALL TRACE] ring timeout started", {
         callId,
         durationMs: RING_TIMEOUT_MS,
@@ -813,6 +843,14 @@ export function useCallingState({
     }
 
     try {
+      console.info("[CALL TRACE] receiver call_accept send started", {
+        callId: session.callId,
+        callerId: session.callerId,
+        receiverId: currentUserId,
+        channelName: signalChannel.topic,
+        subscribedBeforeSend: signalChannelReadyRef.current,
+        eventName: "call_accept",
+      });
       await sendSignal(signalChannel, {
         type: "call_accept",
         call_id: session.callId,
@@ -821,8 +859,23 @@ export function useCallingState({
         community_id: session.communityId,
         timestamp: Date.now(),
       });
-      console.info("[CALL TRACE] call_accept sent", { callId: session.callId });
-    } catch {
+      console.info("[CALL TRACE] receiver call_accept send completed", {
+        callId: session.callId,
+        callerId: session.callerId,
+        receiverId: currentUserId,
+        channelName: signalChannel.topic,
+        eventName: "call_accept",
+        sendResult: "ok",
+      });
+    } catch (error) {
+      console.error("[CALL TRACE] receiver call_accept send failed", {
+        callId: session.callId,
+        callerId: session.callerId,
+        receiverId: currentUserId,
+        channelName: signalChannel.topic,
+        eventName: "call_accept",
+        error,
+      });
       void updateCallStatus(session.callId, "rejected");
       cleanupAll("call-accept-send-failed");
       transition("CONNECTION_FAILED", "Could not accept the call. Please try again.");
