@@ -11,6 +11,8 @@ import {
   subscribeToMessages,
   type ChatMessage,
 } from "@/lib/chat";
+import CallingProvider, { useCallingContext } from "@/components/calling/CallingProvider";
+import CallButton from "@/components/calling/CallButton";
 
 /* ── Types ────────────────────────────────────────────────────── */
 type CommunityInfo = {
@@ -260,6 +262,12 @@ export default function CommunityChatPage() {
   }
 
   return (
+    <CallingProvider
+      currentUserId={user?.id ?? null}
+      currentUserName={myName}
+      communityId={communityId}
+      rawMembers={members}
+    >
     <div className="flex h-screen overflow-hidden bg-[#09080c] text-white">
 
       {/* ══ LEFT SIDEBAR ══ */}
@@ -363,14 +371,20 @@ export default function CommunityChatPage() {
             </div>
           </div>
 
-          {/* Members toggle (mobile) */}
-          <button
-            type="button"
-            onClick={() => setShowMembers((v) => !v)}
-            className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-zinc-300 transition hover:text-white xl:hidden"
-          >
-            <Users size={14} /> {members.length}
-          </button>
+          {/* Right side: call button + mobile members toggle */}
+          <div className="flex items-center gap-2">
+            {/* Call a member — only shown to members */}
+            {isMember ? <ChatCallButton members={members} /> : null}
+
+            {/* Members toggle (mobile) */}
+            <button
+              type="button"
+              onClick={() => setShowMembers((v) => !v)}
+              className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-zinc-300 transition hover:text-white xl:hidden"
+            >
+              <Users size={14} /> {members.length}
+            </button>
+          </div>
         </header>
 
         <div className="flex flex-1 overflow-hidden">
@@ -519,5 +533,39 @@ export default function CommunityChatPage() {
         </div>
       </div>
     </div>
+    </CallingProvider>
+  );
+}
+
+/* ── ChatCallButton ──────────────────────────────────────────────
+ * Inner component that consumes CallingContext.
+ * Must be rendered inside <CallingProvider>.
+ * ─────────────────────────────────────────────────────────────── */
+function ChatCallButton({
+  members,
+}: {
+  members: { user_id: string; role: "owner" | "admin" | "member"; profile?: { full_name?: string | null } | null }[];
+}) {
+  const { callStatus, startCall } = useCallingContext();
+  const isInCall = callStatus !== "IDLE";
+
+  // Build CallMember list (self already excluded by CallingProvider, but we
+  // pass rawMembers here so CallButton gets the full display info).
+  // CallingProvider has already filtered self; we pass the raw list to
+  // CallButton which receives the already-filtered CallMember[] from context.
+  // Simplest: re-derive from members prop using display_name only.
+  const callMembers = members
+    .map((m) => ({
+      user_id: m.user_id,
+      display_name: m.profile?.full_name ?? "Siber Member",
+      role: m.role as "owner" | "admin" | "member",
+    }));
+
+  return (
+    <CallButton
+      members={callMembers}
+      onCall={(targetUserId, callType) => void startCall(targetUserId, callType)}
+      disabled={isInCall}
+    />
   );
 }
