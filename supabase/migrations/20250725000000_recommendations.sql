@@ -40,11 +40,15 @@
 --
 -- Adds:
 --   1. SELECT policy so authenticated users can discover all communities.
---   2. Supporting index for efficient member-count aggregation.
+--
+-- This is necessary for a fresh database installation because migration 001
+-- creates community and membership tables and their base policies, but does
+-- not add the broader authenticated-discovery policy used by the
+-- recommendation feature.
 --
 -- DO NOT APPLY TO PRODUCTION without approval.
 
--- 1. Discovery SELECT policy (idempotent — safe to re-run)
+-- Discovery SELECT policy (idempotent — safe to re-run)
 drop policy if exists "Authenticated users can discover all communities"
   on public.communities;
 
@@ -52,10 +56,3 @@ create policy "Authenticated users can discover all communities"
   on public.communities
   for select
   using (auth.uid() is not null);
-
--- 2. Supporting index for recommendation member-count aggregation queries.
---    The existing community_members_community_id_idx (migration 001) covers
---    (community_id) already. This IF NOT EXISTS guard is a no-op when that
---    index is present; it only creates a new one if the name differs.
-create index if not exists rec_community_members_community_id_idx
-  on public.community_members (community_id);
