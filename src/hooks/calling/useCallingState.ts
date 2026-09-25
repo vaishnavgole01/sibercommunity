@@ -78,6 +78,120 @@ function isPeerConnectionEstablished(pc: RTCPeerConnection | null): boolean {
   );
 }
 
+async function logAudioRtpStats(
+  pc: RTCPeerConnection,
+  role: "caller" | "receiver",
+  callId: string,
+  sample: "ACTIVE" | "ACTIVE+2500ms"
+): Promise<void> {
+  try {
+    const stats = await pc.getStats();
+    const codecs = new Map<string, Record<string, unknown>>();
+    const outboundAudio: Record<string, unknown>[] = [];
+    const inboundAudio: Record<string, unknown>[] = [];
+    const candidatePairs: Record<string, unknown>[] = [];
+
+    stats.forEach((rawReport) => {
+      if (rawReport.type === "codec") {
+        const codec = rawReport as RTCStats & {
+          mimeType?: string;
+          payloadType?: number;
+          clockRate?: number;
+          channels?: number;
+        };
+        codecs.set(codec.id, {
+          mimeType: codec.mimeType,
+          payloadType: codec.payloadType,
+          clockRate: codec.clockRate,
+          channels: codec.channels,
+        });
+        return;
+      }
+
+      if (rawReport.type === "candidate-pair") {
+        const pair = rawReport as RTCIceCandidatePairStats & { selected?: boolean };
+        if (pair.selected || (pair.nominated && pair.state === "succeeded")) {
+          candidatePairs.push({
+            state: pair.state,
+            nominated: pair.nominated,
+            selected: pair.selected,
+            bytesSent: pair.bytesSent,
+            bytesReceived: pair.bytesReceived,
+            currentRoundTripTime: pair.currentRoundTripTime,
+          });
+        }
+        return;
+      }
+
+      if (rawReport.type !== "outbound-rtp" && rawReport.type !== "inbound-rtp") return;
+      const report = rawReport as RTCStats & {
+        kind?: string;
+        mediaType?: string;
+        packetsSent?: number;
+        bytesSent?: number;
+        retransmittedPacketsSent?: number;
+        packetsReceived?: number;
+        packetsLost?: number;
+        bytesReceived?: number;
+        jitter?: number;
+        jitterBufferDelay?: number;
+        jitterBufferEmittedCount?: number;
+        codecId?: string;
+        ssrc?: number;
+      };
+      if ((report.kind ?? report.mediaType) !== "audio") return;
+
+      const audioReport = {
+        type: report.type,
+        kind: report.kind,
+        mediaType: report.mediaType,
+        packetsSent: report.packetsSent,
+        bytesSent: report.bytesSent,
+        retransmittedPacketsSent: report.retransmittedPacketsSent,
+        packetsReceived: report.packetsReceived,
+        packetsLost: report.packetsLost,
+        bytesReceived: report.bytesReceived,
+        jitter: report.jitter,
+        jitterBufferDelay: report.jitterBufferDelay,
+        jitterBufferEmittedCount: report.jitterBufferEmittedCount,
+        codecId: report.codecId,
+        codec: report.codecId ? codecs.get(report.codecId) : undefined,
+        ssrc: report.ssrc,
+      };
+
+      if (report.type === "outbound-rtp") outboundAudio.push(audioReport);
+      else inboundAudio.push(audioReport);
+    });
+
+    console.info("[CALL TRACE] audio RTP stats", {
+      role,
+      callId,
+      sample,
+      outboundAudio,
+      inboundAudio,
+      candidatePairs,
+      senders: pc.getSenders().map((sender) => ({
+        kind: sender.track?.kind,
+        enabled: sender.track?.enabled,
+        readyState: sender.track?.readyState,
+      })),
+      receivers: pc.getReceivers().map((receiver) => ({
+        kind: receiver.track?.kind,
+        enabled: receiver.track?.enabled,
+        muted: receiver.track?.muted,
+        readyState: receiver.track?.readyState,
+      })),
+    });
+  } catch (error) {
+    console.warn("[CALL TRACE] audio RTP stats collection failed", {
+      role,
+      callId,
+      sample,
+      error,
+    });
+  }
+}
+
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useCallingState({
@@ -150,6 +264,17 @@ export function useCallingState({
       next,
       message,
     });
+    if (next === "ACTIVE" && statusRef.current !== "ACTIVE") {
+      const pc = pcRef.current;
+      const session = sessionRef.current;
+      if (pc && session) {
+        const role = currentUserId === session.callerId ? "caller" : "receiver";
+        void logAudioRtpStats(pc, role, session.callId, "ACTIVE");
+        setTimeout(() => {
+          void logAudioRtpStats(pc, role, session.callId, "ACTIVE+2500ms");
+        }, 2_500);
+      }
+    }
     statusRef.current = next;
     if (next === "ACTIVE") {
       console.info("[CALL TRACE] ACTIVE transition clearing timeout", {
@@ -171,7 +296,7 @@ export function useCallingState({
         setStatusMessage("");
       }, TERMINAL_DISPLAY_MS);
     }
-  }, []);
+  }, [currentUserId]);
 
   // ── Helper: deduplication key ────────────────────────────────────────────────
   const isDuplicate = useCallback((msg: SignalMessage): boolean => {
