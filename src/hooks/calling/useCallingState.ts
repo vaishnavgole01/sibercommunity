@@ -93,7 +93,18 @@ export function useCallingState({
   const statusRef = useRef<CallStatus>("IDLE");
 
   // Channels
+  // notifyChannelRef  — permanent: the callee's OWN incoming-call subscription
+  //                     (`call_notify_{currentUserId}`). Mounted once in the
+  //                     useEffect at the bottom of this hook. Must survive
+  //                     cleanupAll() — it is only removed on unmount.
   const notifyChannelRef = useRef<RealtimeChannel | null>(null);
+
+  // callerNotifyChannelRef — temporary: the outbound channel a caller subscribes
+  //                          to on the CALLEE's notify topic (`call_notify_{targetUserId}`)
+  //                          in order to deliver the call_invite. Created in
+  //                          startCall(), torn down in cleanupAll().
+  const callerNotifyChannelRef = useRef<RealtimeChannel | null>(null);
+
   const signalChannelRef = useRef<RealtimeChannel | null>(null);
 
   // Timers
@@ -186,6 +197,14 @@ export function useCallingState({
     if (signalChannelRef.current) {
       void supabase.removeChannel(signalChannelRef.current);
       signalChannelRef.current = null;
+    }
+
+    // Remove the temporary caller-side outbound notify channel (if any).
+    // This is the channel opened to the callee's topic in startCall() and
+    // must NOT be confused with notifyChannelRef (the permanent subscription).
+    if (callerNotifyChannelRef.current) {
+      void supabase.removeChannel(callerNotifyChannelRef.current);
+      callerNotifyChannelRef.current = null;
     }
 
     iceCandidateQueueRef.current = [];
@@ -465,9 +484,11 @@ export function useCallingState({
         return;
       }
 
-      // Send call_invite to callee's personal notification channel
+      // Send call_invite to callee's personal notification channel.
+      // Stored in callerNotifyChannelRef (temporary) — NOT notifyChannelRef
+      // (which is the permanent incoming-call subscription for this user).
       const notifyChannel = supabase.channel(notifyChannelName(targetUserId));
-      notifyChannelRef.current = notifyChannel;
+      callerNotifyChannelRef.current = notifyChannel;
 
       await new Promise<void>((resolve) => {
         notifyChannel.subscribe((status) => {

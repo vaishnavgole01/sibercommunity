@@ -94,7 +94,9 @@ create policy "Community members can initiate calls"
 
 -- ── UPDATE policy (caller) ────────────────────────────────────────────────────
 -- The caller can update status (to active/ended/missed) and ended_at.
--- They cannot change caller_id, callee_id, or community_id.
+-- WITH CHECK prevents rewriting immutable identity fields (caller_id, callee_id,
+-- community_id, call_type) by asserting they match the values already stored
+-- in the row via a correlated sub-query.
 
 drop policy if exists "Caller can update call status" on public.calls;
 
@@ -104,10 +106,21 @@ create policy "Caller can update call status"
   using (
     auth.uid() is not null
     and caller_id = auth.uid()
+  )
+  with check (
+    auth.uid() is not null
+    and caller_id = auth.uid()
+    -- immutable fields must not be changed
+    and (caller_id, callee_id, community_id, call_type) = (
+      select c.caller_id, c.callee_id, c.community_id, c.call_type
+      from public.calls c
+      where c.id = calls.id
+    )
   );
 
 -- ── UPDATE policy (callee) ────────────────────────────────────────────────────
 -- The callee can update status (to active/rejected/ended) and ended_at.
+-- WITH CHECK prevents rewriting immutable identity fields.
 
 drop policy if exists "Callee can update call status" on public.calls;
 
@@ -117,6 +130,16 @@ create policy "Callee can update call status"
   using (
     auth.uid() is not null
     and callee_id = auth.uid()
+  )
+  with check (
+    auth.uid() is not null
+    and callee_id = auth.uid()
+    -- immutable fields must not be changed
+    and (caller_id, callee_id, community_id, call_type) = (
+      select c.caller_id, c.callee_id, c.community_id, c.call_type
+      from public.calls c
+      where c.id = calls.id
+    )
   );
 
 -- ── No DELETE policy ─────────────────────────────────────────────────────────
