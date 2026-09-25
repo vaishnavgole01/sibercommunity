@@ -90,10 +90,7 @@ async function logAudioRtpStats(
 ): Promise<void> {
   try {
     const stats = await pc.getStats();
-    const codecs = new Map<string, Record<string, unknown>>();
-    const outboundAudio: Record<string, unknown>[] = [];
-    const inboundAudio: Record<string, unknown>[] = [];
-    const candidatePairs: Record<string, unknown>[] = [];
+    const codecs = new Map<string, string>();
 
     stats.forEach((rawReport) => {
       if (rawReport.type === "codec") {
@@ -103,26 +100,27 @@ async function logAudioRtpStats(
           clockRate?: number;
           channels?: number;
         };
-        codecs.set(codec.id, {
-          mimeType: codec.mimeType,
-          payloadType: codec.payloadType,
-          clockRate: codec.clockRate,
-          channels: codec.channels,
-        });
+        codecs.set(codec.id, codec.mimeType ?? "unknown");
         return;
       }
 
       if (rawReport.type === "candidate-pair") {
         const pair = rawReport as RTCIceCandidatePairStats & { selected?: boolean };
         if (pair.selected || pair.nominated || pair.state === "in-progress") {
-          candidatePairs.push({
+          console.log("[AUDIO RTP]", JSON.stringify({
+            role,
+            sample,
+            connectionState: pc.connectionState,
+            iceState: pc.iceConnectionState,
+            report: "selected-candidate-pair",
             state: pair.state,
-            nominated: pair.nominated,
-            selected: pair.selected,
-            bytesSent: pair.bytesSent,
-            bytesReceived: pair.bytesReceived,
-            currentRoundTripTime: pair.currentRoundTripTime,
-          });
+            nominated: pair.nominated ?? null,
+            bytesSent: pair.bytesSent ?? null,
+            bytesReceived: pair.bytesReceived ?? null,
+            currentRoundTripTime: pair.currentRoundTripTime ?? null,
+            localCandidateId: pair.localCandidateId ?? null,
+            remoteCandidateId: pair.remoteCandidateId ?? null,
+          }));
         }
         return;
       }
@@ -146,25 +144,27 @@ async function logAudioRtpStats(
       if ((report.kind ?? report.mediaType) !== "audio") return;
 
       const audioReport = {
+        role,
+        sample,
+        connectionState: pc.connectionState,
+        iceState: pc.iceConnectionState,
         type: report.type,
-        kind: report.kind,
-        mediaType: report.mediaType,
-        packetsSent: report.packetsSent,
-        bytesSent: report.bytesSent,
-        retransmittedPacketsSent: report.retransmittedPacketsSent,
-        packetsReceived: report.packetsReceived,
-        packetsLost: report.packetsLost,
-        bytesReceived: report.bytesReceived,
-        jitter: report.jitter,
-        jitterBufferDelay: report.jitterBufferDelay,
-        jitterBufferEmittedCount: report.jitterBufferEmittedCount,
-        codecId: report.codecId,
-        codec: report.codecId ? codecs.get(report.codecId) : undefined,
-        ssrc: report.ssrc,
+        kind: report.kind ?? report.mediaType ?? null,
+        packetsSent: report.packetsSent ?? null,
+        bytesSent: report.bytesSent ?? null,
+        packetsLost: report.packetsLost ?? null,
+        retransmittedPacketsSent: report.retransmittedPacketsSent ?? null,
+        packetsReceived: report.packetsReceived ?? null,
+        bytesReceived: report.bytesReceived ?? null,
+        jitter: report.jitter ?? null,
+        jitterBufferDelay: report.jitterBufferDelay ?? null,
+        jitterBufferEmittedCount: report.jitterBufferEmittedCount ?? null,
+        codecId: report.codecId ?? null,
+        codecName: report.codecId ? codecs.get(report.codecId) ?? null : null,
+        ssrc: report.ssrc ?? null,
       };
 
-      if (report.type === "outbound-rtp") outboundAudio.push(audioReport);
-      else inboundAudio.push(audioReport);
+      console.log("[AUDIO RTP]", JSON.stringify(audioReport));
     });
 
     console.info("[CALL TRACE] audio RTP stats", {
@@ -176,9 +176,6 @@ async function logAudioRtpStats(
         iceConnectionState: pc.iceConnectionState,
         signalingState: pc.signalingState,
       },
-      outboundAudio,
-      inboundAudio,
-      candidatePairs,
       senders: pc.getSenders().map((sender) => {
         const parameters = sender.getParameters();
         return {
