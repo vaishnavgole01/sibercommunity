@@ -45,16 +45,60 @@ export async function sendSignal(
   channel: RealtimeChannel,
   msg: SignalMessage
 ): Promise<void> {
-  await channel.send({
+  console.info("[CALL TRACE] signaling send started", {
+    channel: channel.topic,
+    event: msg.type,
+    callId: msg.call_id,
+    receiverId: msg.receiver_id,
+  });
+  const result = await channel.send({
     type: "broadcast",
     event: msg.type,
     payload: msg,
   });
+  console.info("[CALL TRACE] signaling send result", {
+    channel: channel.topic,
+    event: msg.type,
+    callId: msg.call_id,
+    result,
+  });
+  if (result !== "ok") {
+    throw new Error(`Failed to send ${msg.type}: ${result}`);
+  }
 }
 
 // ── Subscription builders ─────────────────────────────────────────────────────
 
 type SignalHandler = (msg: SignalMessage) => void;
+
+export function waitForChannelReady(
+  channel: RealtimeChannel,
+  label: string,
+  timeoutMs = 10_000
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label}: realtime channel subscription timed out`));
+    }, timeoutMs);
+
+    channel.subscribe((status) => {
+      console.info("[CALL TRACE] signaling subscription status", {
+        channel: label,
+        status,
+      });
+      if (status === "SUBSCRIBED") {
+        clearTimeout(timer);
+        resolve();
+        return;
+      }
+
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        clearTimeout(timer);
+        reject(new Error(`${label}: realtime channel subscription failed (${status})`));
+      }
+    });
+  });
+}
 
 /**
  * Subscribe to the personal notification channel for a user.
@@ -64,7 +108,7 @@ type SignalHandler = (msg: SignalMessage) => void;
 export function subscribeToNotifications(
   userId: string,
   onInvite: SignalHandler
-): { channel: RealtimeChannel; unsubscribe: () => void } {
+): { channel: RealtimeChannel; ready: Promise<void>; unsubscribe: () => void } {
   const channel = supabase
     .channel(notifyChannelName(userId))
     .on(
@@ -73,15 +117,16 @@ export function subscribeToNotifications(
       ({ payload }: { payload: unknown }) => {
         const msg = payload as SignalMessage;
         if (!isValidSignal(msg)) return;
-        // Only handle messages addressed to this user
         if (msg.receiver_id !== userId) return;
         onInvite(msg);
       }
-    )
-    .subscribe();
+    );
+
+  const ready = waitForChannelReady(channel, notifyChannelName(userId));
 
   return {
     channel,
+    ready,
     unsubscribe: () => void supabase.removeChannel(channel),
   };
 }
@@ -96,7 +141,7 @@ export function subscribeToSignaling(
   localUserId: string,
   remoteUserId: string,
   handlers: Partial<Record<SignalType, SignalHandler>>
-): { channel: RealtimeChannel; unsubscribe: () => void } {
+): { channel: RealtimeChannel; ready: Promise<void>; unsubscribe: () => void } {
   const name = signalChannelName(communityId, localUserId, remoteUserId);
 
   let ch = supabase.channel(name);
@@ -105,6 +150,7 @@ export function subscribeToSignaling(
   const signalTypes: SignalType[] = [
     "call_offer",
     "call_accept",
+    "call_answer",
     "call_reject",
     "call_cancel",
     "call_end",
@@ -130,10 +176,11 @@ export function subscribeToSignaling(
     );
   }
 
-  ch.subscribe();
+  const ready = waitForChannelReady(ch, name);
 
   return {
     channel: ch,
+    ready,
     unsubscribe: () => void supabase.removeChannel(ch),
   };
 }

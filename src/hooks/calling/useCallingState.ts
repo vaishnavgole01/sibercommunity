@@ -35,6 +35,7 @@ import {
   sendSignal,
   subscribeToNotifications,
   subscribeToSignaling,
+  waitForChannelReady,
   createCallRecord,
   updateCallStatus,
   cleanupStaleCalls,
@@ -68,6 +69,15 @@ interface UseCallingStateParams {
   members: CallMember[];
 }
 
+function isPeerConnectionEstablished(pc: RTCPeerConnection | null): boolean {
+  return Boolean(
+    pc &&
+      (pc.connectionState === "connected" ||
+        pc.iceConnectionState === "connected" ||
+        pc.iceConnectionState === "completed")
+  );
+}
+
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useCallingState({
@@ -91,6 +101,7 @@ export function useCallingState({
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const sessionRef = useRef<CallSession | null>(null);
   const statusRef = useRef<CallStatus>("IDLE");
+  const connectionFailureHandledRef = useRef(false);
 
   // Channels
   // notifyChannelRef  — permanent: the callee's OWN incoming-call subscription
@@ -120,6 +131,9 @@ export function useCallingState({
 
   // Buffered SDP offer for callee (arrives just after call_invite)
   const bufferedOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
+  const offerResolverRef = useRef<
+    ((offer: RTCSessionDescriptionInit | null) => void) | null
+  >(null);
 
   // ── Sync refs with state ─────────────────────────────────────────────────────
   useEffect(() => { statusRef.current = callStatus; }, [callStatus]);
@@ -130,6 +144,21 @@ export function useCallingState({
   // ── Helper: safe status transitions ─────────────────────────────────────────
 
   const transition = useCallback((next: CallStatus, message = "") => {
+    console.info("[CALL TRACE] call state changed", {
+      previous: statusRef.current,
+      next,
+      message,
+    });
+    statusRef.current = next;
+    if (next === "ACTIVE") {
+      console.info("[CALL TRACE] ACTIVE transition clearing timeout", {
+        hadConnectionTimeout: iceTimerRef.current !== null,
+      });
+      if (iceTimerRef.current) {
+        clearTimeout(iceTimerRef.current);
+        iceTimerRef.current = null;
+      }
+    }
     setCallStatus(next);
     setStatusMessage(message);
 
@@ -167,6 +196,7 @@ export function useCallingState({
 
   const clearIceTimer = useCallback(() => {
     if (iceTimerRef.current) {
+      console.info("[CALL TRACE] connection timeout cleared");
       clearTimeout(iceTimerRef.current);
       iceTimerRef.current = null;
     }
@@ -181,7 +211,12 @@ export function useCallingState({
 
   // ── Cleanup all resources ────────────────────────────────────────────────────
 
-  const cleanupAll = useCallback(() => {
+  const cleanupAll = useCallback((reason = "unspecified") => {
+    console.trace("[CALL TRACE] cleanup started", {
+      reason,
+      status: statusRef.current,
+      callId: sessionRef.current?.callId ?? null,
+    });
     clearRingTimer();
     clearIceTimer();
     clearTerminalTimer();
@@ -210,6 +245,8 @@ export function useCallingState({
     iceCandidateQueueRef.current = [];
     processedSignalsRef.current.clear();
     bufferedOfferRef.current = null;
+    offerResolverRef.current?.(null);
+    offerResolverRef.current = null;
     setIsMuted(false);
     setIsCameraOff(false);
   }, [clearRingTimer, clearIceTimer, clearTerminalTimer]);
@@ -217,9 +254,27 @@ export function useCallingState({
   // ── Error helpers (declared before setupPeerConnection to avoid TDZ) ─────────
 
   const handleConnectionFailure = useCallback(
-    (msg: string) => {
+    (msg: string, fromTimeout = false) => {
+      const pc = pcRef.current;
+      if (
+        fromTimeout &&
+        (statusRef.current === "ACTIVE" || isPeerConnectionEstablished(pc))
+      ) {
+        console.info("[CALL TRACE] timeout ignored because connection is already connected/ACTIVE", {
+          status: statusRef.current,
+          connectionState: pc?.connectionState ?? null,
+          iceConnectionState: pc?.iceConnectionState ?? null,
+        });
+        clearIceTimer();
+        return;
+      }
+      if (connectionFailureHandledRef.current) {
+        console.info("[CALL TRACE] duplicate connection failure ignored");
+        return;
+      }
+      connectionFailureHandledRef.current = true;
+
       const sess = sessionRef.current;
-      if (sess) void updateCallStatus(sess.callId, "ended", true);
 
       // Send call_end to remote so they don't stay stuck
       const sig = signalChannelRef.current;
@@ -235,11 +290,65 @@ export function useCallingState({
           timestamp: Date.now(),
         });
       }
-      cleanupAll();
+      cleanupAll("connection-failure");
       transition("CONNECTION_FAILED", msg);
     },
-    [currentUserId, cleanupAll, transition]
+    [currentUserId, clearIceTimer, cleanupAll, transition]
   );
+
+  const startIceTimer = useCallback((phase: string) => {
+    clearIceTimer();
+    const pc = pcRef.current;
+    if (statusRef.current === "ACTIVE" || isPeerConnectionEstablished(pc)) {
+      console.info("[CALL TRACE] timeout ignored because connection is already connected/ACTIVE", {
+        phase,
+        status: statusRef.current,
+        connectionState: pc?.connectionState ?? null,
+        iceConnectionState: pc?.iceConnectionState ?? null,
+      });
+      return;
+    }
+
+    console.info("[CALL TRACE] connection timeout started", {
+      phase,
+      durationMs: ICE_TIMEOUT_MS,
+      status: statusRef.current,
+    });
+    iceTimerRef.current = setTimeout(() => {
+      const currentPc = pcRef.current;
+      if (
+        statusRef.current === "ACTIVE" ||
+        isPeerConnectionEstablished(currentPc)
+      ) {
+        console.info("[CALL TRACE] timeout ignored because connection is already connected/ACTIVE", {
+          phase,
+          status: statusRef.current,
+          connectionState: currentPc?.connectionState ?? null,
+          iceConnectionState: currentPc?.iceConnectionState ?? null,
+        });
+        clearIceTimer();
+        return;
+      }
+
+      if (statusRef.current !== "CONNECTING") {
+        console.info("[CALL TRACE] connection timeout ignored because call is no longer CONNECTING", {
+          phase,
+          status: statusRef.current,
+        });
+        clearIceTimer();
+        return;
+      }
+
+      console.error("[CALL TRACE] actual connection failure", {
+        phase,
+        status: statusRef.current,
+        connectionState: currentPc?.connectionState ?? null,
+        iceConnectionState: currentPc?.iceConnectionState ?? null,
+      });
+      clearIceTimer();
+      handleConnectionFailure("Connection timed out. Check your network and try again.", true);
+    }, ICE_TIMEOUT_MS);
+  }, [clearIceTimer, handleConnectionFailure]);
 
   const handleRemoteDisconnect = useCallback(() => {
     if (
@@ -249,7 +358,7 @@ export function useCallingState({
       return;
     const sess = sessionRef.current;
     if (sess) void updateCallStatus(sess.callId, "ended", true);
-    cleanupAll();
+    cleanupAll("remote-disconnect");
     transition("REMOTE_DISCONNECTED", "The connection was lost.");
   }, [cleanupAll, transition]);
 
@@ -262,11 +371,33 @@ export function useCallingState({
 
       // Remote stream arrives via ontrack
       pc.ontrack = (event) => {
-        const [remoteTrackStream] = event.streams;
-        if (remoteTrackStream) {
-          remoteStreamRef.current = remoteTrackStream;
-          setRemoteStream(remoteTrackStream);
+        const eventStream = event.streams[0];
+        const remoteTrackStream =
+          eventStream ?? remoteStreamRef.current ?? new MediaStream();
+        if (!eventStream && !remoteTrackStream.getTracks().some((track) => track.id === event.track.id)) {
+          remoteTrackStream.addTrack(event.track);
         }
+        console.info("[CALL TRACE] remote track received", {
+          kind: event.track.kind,
+          readyState: event.track.readyState,
+          enabled: event.track.enabled,
+          eventStreamCount: event.streams.length,
+          eventStreamTrackKinds: event.streams.flatMap((stream) =>
+            stream.getTracks().map((track) => ({ kind: track.kind, readyState: track.readyState }))
+          ),
+          assembledStreamTrackKinds: remoteTrackStream.getTracks().map((track) => ({
+            kind: track.kind,
+            readyState: track.readyState,
+          })),
+          receivers: pc.getReceivers().map((receiver) => ({
+            kind: receiver.track?.kind,
+            enabled: receiver.track?.enabled,
+            muted: receiver.track?.muted,
+            readyState: receiver.track?.readyState,
+          })),
+        });
+        remoteStreamRef.current = remoteTrackStream;
+        setRemoteStream(remoteTrackStream);
       };
 
       // Send our ICE candidates to the remote peer
@@ -288,19 +419,41 @@ export function useCallingState({
           timestamp: Date.now(),
           payload: { candidate: event.candidate.toJSON() },
         };
-        void sendSignal(sig, msg);
+        console.info("[CALL TRACE] ICE candidate sent", {
+          callId: currentSession.callId,
+          receiverId: msg.receiver_id,
+        });
+        void sendSignal(sig, msg).catch(() => {
+          handleConnectionFailure("Failed to send network connection data. Please try again.");
+        });
       };
 
-      // Monitor connection state
+      pc.onconnectionstatechange = () => {
+        console.info("[CALL TRACE] RTCPeerConnection connectionState change", {
+          connectionState: pc.connectionState,
+          iceConnectionState: pc.iceConnectionState,
+          signalingState: pc.signalingState,
+        });
+        if (!isPeerConnectionEstablished(pc)) return;
+        if (statusRef.current === "CONNECTING") {
+          const sess = sessionRef.current;
+          if (sess) void updateCallStatus(sess.callId, "active");
+          transition("ACTIVE");
+        } else {
+          clearIceTimer();
+        }
+      };
+
       pc.oniceconnectionstatechange = () => {
         const state = pc.iceConnectionState;
 
         if (isConnected(state)) {
-          clearIceTimer();
           if (statusRef.current === "CONNECTING") {
             const sess = sessionRef.current;
             if (sess) void updateCallStatus(sess.callId, "active");
             transition("ACTIVE");
+          } else {
+            clearIceTimer();
           }
         } else if (isFailed(state)) {
           clearIceTimer();
@@ -324,46 +477,83 @@ export function useCallingState({
   // ── Subscribe to the two-party signaling channel ─────────────────────────────
 
   const subscribeToCallChannel = useCallback(
-    (session: CallSession) => {
+    async (session: CallSession) => {
       const remoteId =
         currentUserId === session.callerId ? session.calleeId : session.callerId;
 
-      const { channel } = subscribeToSignaling(
+      const { channel, ready } = subscribeToSignaling(
         session.communityId,
         currentUserId!,
         remoteId,
         {
           call_offer: (msg) => {
             if (isDuplicate(msg)) return;
-            if (statusRef.current !== "INCOMING_RING") return;
+            console.info("[CALL TRACE] call_offer received", { callId: msg.call_id });
+            if (msg.call_id !== sessionRef.current?.callId) return;
+            if (statusRef.current !== "INCOMING_RING" && statusRef.current !== "CONNECTING") return;
             const offerPayload = msg.payload as { sdp_offer?: RTCSessionDescriptionInit };
             if (offerPayload?.sdp_offer) {
               bufferedOfferRef.current = offerPayload.sdp_offer;
+              offerResolverRef.current?.(offerPayload.sdp_offer);
+              offerResolverRef.current = null;
             }
           },
 
           call_accept: (msg) => {
             if (isDuplicate(msg)) return;
-            if (statusRef.current !== "OUTGOING_RING") return;
+            console.info("[CALL TRACE] call_accept received", { callId: msg.call_id });
+            if (msg.call_id !== sessionRef.current?.callId || statusRef.current !== "OUTGOING_RING") return;
             clearRingTimer();
             transition("CONNECTING");
-
-            const answerPayload = msg.payload as { sdp_answer?: RTCSessionDescriptionInit };
-            if (answerPayload?.sdp_answer && pcRef.current) {
-              const pc = pcRef.current;
-              applyRemoteAnswer(pc, answerPayload.sdp_answer)
-                .then(() => drainIceCandidateQueue(pc, iceCandidateQueueRef.current))
-                .then(() => {
-                  iceCandidateQueueRef.current = [];
-                  // Start ICE timeout
-                  iceTimerRef.current = setTimeout(() => {
-                    handleConnectionFailure("Connection timed out. Check your network and try again.");
-                  }, ICE_TIMEOUT_MS);
-                })
-                .catch(() => {
-                  handleConnectionFailure("Failed to establish call. Please try again.");
-                });
+            const pc = pcRef.current;
+            if (!pc) {
+              handleConnectionFailure("Call connection was not ready. Please try again.");
+              return;
             }
+
+            void createOffer(pc)
+              .then((offer) => {
+                const sess = sessionRef.current;
+                const sig = signalChannelRef.current;
+                if (!sess || !sig) throw new Error("Call signaling channel is unavailable.");
+                startIceTimer("waiting-for-call-answer");
+                return sendSignal(sig, {
+                  type: "call_offer",
+                  call_id: sess.callId,
+                  sender_id: currentUserId!,
+                  receiver_id: sess.calleeId,
+                  community_id: sess.communityId,
+                  timestamp: Date.now(),
+                  payload: { sdp_offer: offer },
+                }).then(() => {
+                  console.info("[CALL TRACE] call_offer sent", { callId: sess.callId });
+                });
+              })
+              .catch(() => handleConnectionFailure("Failed to create or send call offer. Please try again."));
+          },
+
+          call_answer: (msg) => {
+            if (isDuplicate(msg)) return;
+            console.info("[CALL TRACE] call_answer received", { callId: msg.call_id });
+            if (msg.call_id !== sessionRef.current?.callId || statusRef.current !== "CONNECTING") return;
+            const answerPayload = msg.payload as { sdp_answer?: RTCSessionDescriptionInit };
+            const pc = pcRef.current;
+            if (!answerPayload?.sdp_answer || !pc) return;
+            clearIceTimer();
+            applyRemoteAnswer(pc, answerPayload.sdp_answer)
+              .then(async () => {
+                const count = iceCandidateQueueRef.current.length;
+                await drainIceCandidateQueue(pc, iceCandidateQueueRef.current);
+                console.info("[CALL TRACE] ICE candidates flushed", {
+                  callId: msg.call_id,
+                  count,
+                });
+              })
+              .then(() => {
+                iceCandidateQueueRef.current = [];
+                startIceTimer("ICE-establishment-after-answer");
+              })
+              .catch(() => handleConnectionFailure("Failed to establish call. Please try again."));
           },
 
           call_reject: (msg) => {
@@ -372,14 +562,14 @@ export function useCallingState({
             clearRingTimer();
             const sess = sessionRef.current;
             if (sess) void updateCallStatus(sess.callId, "rejected");
-            cleanupAll();
+            cleanupAll("remote-call-rejected");
             transition("REJECTED", "Call was declined.");
           },
 
           call_cancel: (msg) => {
             if (isDuplicate(msg)) return;
-            if (statusRef.current !== "INCOMING_RING") return;
-            cleanupAll();
+            if (statusRef.current !== "INCOMING_RING" && statusRef.current !== "CONNECTING") return;
+            cleanupAll("remote-call-cancelled");
             transition("CANCELLED", "Caller cancelled the call.");
           },
 
@@ -392,21 +582,23 @@ export function useCallingState({
               return;
             const sess = sessionRef.current;
             if (sess) void updateCallStatus(sess.callId, "ended", true);
-            cleanupAll();
+            cleanupAll("remote-call-ended");
             transition("REMOTE_DISCONNECTED", "The other person ended the call.");
           },
 
           ice_candidate: (msg) => {
             if (isDuplicate(msg)) return;
+            console.info("[CALL TRACE] ICE candidate received", { callId: msg.call_id });
             const payload = msg.payload as { candidate?: RTCIceCandidateInit };
             if (!payload?.candidate) return;
 
             const pc = pcRef.current;
-            if (!pc) return;
-
-            // If remote description not yet set, buffer the candidate
-            if (!pc.remoteDescription) {
+            if (!pc || !pc.remoteDescription) {
               iceCandidateQueueRef.current.push(payload.candidate);
+              console.info("[CALL TRACE] ICE candidate buffered", {
+                callId: msg.call_id,
+                queueLength: iceCandidateQueueRef.current.length,
+              });
             } else {
               void addIceCandidate(pc, payload.candidate);
             }
@@ -415,20 +607,34 @@ export function useCallingState({
       );
 
       signalChannelRef.current = channel;
+      console.info("[CALL TRACE] signaling channel created", {
+        callId: session.callId,
+        remoteId,
+      });
+
+      await ready;
     },
-    [currentUserId, isDuplicate, clearRingTimer, transition, cleanupAll, handleConnectionFailure]
+    [currentUserId, isDuplicate, clearRingTimer, transition, cleanupAll, handleConnectionFailure, startIceTimer]
   );
 
   // ── startCall ─────────────────────────────────────────────────────────────────
 
   const startCall = useCallback(
     async (targetUserId: string, callType: CallType) => {
+      console.info("[CALL TRACE] startCall entered", {
+        targetUserId,
+        callType,
+        currentUserId,
+        communityId,
+        status: statusRef.current,
+      });
       if (!currentUserId || !communityId) return;
       if (statusRef.current !== "IDLE") return;
 
       // Find the target member
       const targetMember = members.find((m) => m.user_id === targetUserId);
       if (!targetMember) return;
+      connectionFailureHandledRef.current = false;
 
       // Acquire media
       const { stream, error: mediaError } = await getLocalMedia(callType);
@@ -443,13 +649,16 @@ export function useCallingState({
       // Create DB record
       let callId: string;
       try {
+        console.info("[CALL TRACE] creating call DB record");
         callId = await createCallRecord({
           communityId,
           callerId: currentUserId,
           calleeId: targetUserId,
           callType,
         });
-      } catch {
+        console.info("[CALL TRACE] call DB record created", { callId });
+      } catch (error) {
+        console.error("[CALL TRACE] call DB record creation failed", error);
         teardown(null, stream, null);
         setLocalStream(null);
         localStreamRef.current = null;
@@ -468,33 +677,35 @@ export function useCallingState({
       setCallSession(session);
       sessionRef.current = session;
 
-      // Subscribe to the shared signal channel before sending the invite
-      subscribeToCallChannel(session);
-
-      // Create RTCPeerConnection and offer
-      const pc = setupPeerConnection(session, stream);
-      let offer: RTCSessionDescriptionInit;
+      // Both peers must be subscribed before the invite or later SDP is sent.
       try {
-        offer = await createOffer(pc);
-      } catch {
+        await subscribeToCallChannel(session);
+        setupPeerConnection(session, stream);
+      } catch (error) {
+        console.error("[CALL TRACE] caller signaling subscription failed", error);
         void updateCallStatus(callId, "ended", true);
-        cleanupAll();
+        cleanupAll("caller-signaling-subscription-failed");
         setCallSession(null);
-        transition("CONNECTION_FAILED", "Failed to create call offer. Please try again.");
+        transition("CONNECTION_FAILED", "Could not reach the other member. Please try again.");
         return;
       }
 
-      // Send call_invite to callee's personal notification channel.
-      // Stored in callerNotifyChannelRef (temporary) — NOT notifyChannelRef
-      // (which is the permanent incoming-call subscription for this user).
       const notifyChannel = supabase.channel(notifyChannelName(targetUserId));
       callerNotifyChannelRef.current = notifyChannel;
-
-      await new Promise<void>((resolve) => {
-        notifyChannel.subscribe((status) => {
-          if (status === "SUBSCRIBED") resolve();
-        });
+      console.info("[CALL TRACE] caller notification channel created", {
+        channel: notifyChannel.topic,
+        callId,
       });
+      try {
+        await waitForChannelReady(notifyChannel, notifyChannelName(targetUserId));
+      } catch (error) {
+        console.error("[CALL TRACE] caller notification subscription failed", error);
+        void updateCallStatus(callId, "ended", true);
+        cleanupAll("caller-notification-subscription-failed");
+        setCallSession(null);
+        transition("CONNECTION_FAILED", "Could not reach the other member. Please try again.");
+        return;
+      }
 
       const inviteMsg: SignalMessage = {
         type: "call_invite",
@@ -505,29 +716,19 @@ export function useCallingState({
         timestamp: Date.now(),
         payload: { call_type: callType, caller_name: currentUserName },
       };
-      await sendSignal(notifyChannel, inviteMsg);
-
-      // Also send the offer on the shared signal channel
-      const offerMsg: SignalMessage = {
-        type: "call_offer",
-        call_id: callId,
-        sender_id: currentUserId,
-        receiver_id: targetUserId,
-        community_id: communityId,
-        timestamp: Date.now(),
-        payload: { sdp_offer: offer },
-      };
-      if (signalChannelRef.current) {
-        await sendSignal(signalChannelRef.current, offerMsg);
-      }
-
       transition("OUTGOING_RING", `Calling ${targetMember.display_name}…`);
-
-      // Ring timeout
+      console.info("[CALL TRACE] ring timeout started", {
+        callId,
+        durationMs: RING_TIMEOUT_MS,
+      });
       ringTimerRef.current = setTimeout(() => {
+        console.warn("[CALL TRACE] ring timeout fired", {
+          callId,
+          status: statusRef.current,
+          durationMs: RING_TIMEOUT_MS,
+        });
         if (statusRef.current === "OUTGOING_RING") {
           void updateCallStatus(callId, "missed");
-          // Notify callee to dismiss
           if (signalChannelRef.current && sessionRef.current) {
             void sendSignal(signalChannelRef.current, {
               type: "call_cancel",
@@ -538,10 +739,24 @@ export function useCallingState({
               timestamp: Date.now(),
             });
           }
-          cleanupAll();
+          cleanupAll("caller-ring-timeout");
           transition("TIMEOUT", "No answer.");
         }
       }, RING_TIMEOUT_MS);
+
+      try {
+        await sendSignal(notifyChannel, inviteMsg);
+      } catch (error) {
+        console.error("[CALL TRACE] invite send failed", error);
+        void updateCallStatus(callId, "ended", true);
+        cleanupAll("call-invite-send-failed");
+        transition("CONNECTION_FAILED", "Could not reach the other member. Please try again.");
+        return;
+      }
+      console.info("[CALL TRACE] invite send completed", {
+        callId,
+        recipient: targetUserId,
+      });
     },
     [
       currentUserId,
@@ -562,6 +777,8 @@ export function useCallingState({
     if (!session || statusRef.current !== "INCOMING_RING") return;
 
     clearRingTimer();
+    connectionFailureHandledRef.current = false;
+    transition("CONNECTING");
 
     // Acquire media
     const { stream, error: mediaError } = await getLocalMedia(session.callType);
@@ -579,7 +796,7 @@ export function useCallingState({
         });
       }
       void updateCallStatus(session.callId, "rejected");
-      cleanupAll();
+      cleanupAll("callee-media-permission-failed");
       return;
     }
 
@@ -588,32 +805,34 @@ export function useCallingState({
 
     const pc = setupPeerConnection(session, stream);
 
-    // Override ICE candidate handler for callee perspective
-    pc.onicecandidate = (event) => {
-      if (!event.candidate) return;
-      const sig = signalChannelRef.current;
-      if (!sig || !sessionRef.current) return;
-      void sendSignal(sig, {
-        type: "ice_candidate",
-        call_id: sessionRef.current.callId,
-        sender_id: currentUserId!,
-        receiver_id: sessionRef.current.callerId,
-        community_id: sessionRef.current.communityId,
-        timestamp: Date.now(),
-        payload: { candidate: event.candidate.toJSON() },
-      });
-    };
-
-    // Wait briefly for buffered offer if not yet received
-    if (!bufferedOfferRef.current) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+    const signalChannel = signalChannelRef.current;
+    if (!signalChannel) {
+      cleanupAll("callee-signal-channel-missing");
+      transition("CONNECTION_FAILED", "Call signaling is unavailable. Please try again.");
+      return;
     }
 
-    const offer = bufferedOfferRef.current;
-    if (!offer) {
+    try {
+      await sendSignal(signalChannel, {
+        type: "call_accept",
+        call_id: session.callId,
+        sender_id: currentUserId!,
+        receiver_id: session.callerId,
+        community_id: session.communityId,
+        timestamp: Date.now(),
+      });
+      console.info("[CALL TRACE] call_accept sent", { callId: session.callId });
+    } catch {
       void updateCallStatus(session.callId, "rejected");
-      cleanupAll();
-      transition("CONNECTION_FAILED", "Failed to receive call offer. Please try again.");
+      cleanupAll("call-accept-send-failed");
+      transition("CONNECTION_FAILED", "Could not accept the call. Please try again.");
+      return;
+    }
+
+    const offer = bufferedOfferRef.current ?? await new Promise<RTCSessionDescriptionInit | null>(
+      (resolve) => { offerResolverRef.current = resolve; }
+    );
+    if (!offer) {
       return;
     }
 
@@ -622,19 +841,23 @@ export function useCallingState({
       answer = await createAnswer(pc, offer);
     } catch {
       void updateCallStatus(session.callId, "rejected");
-      cleanupAll();
+      cleanupAll("callee-answer-creation-failed");
       transition("CONNECTION_FAILED", "Failed to process call. Please try again.");
       return;
     }
 
     // Drain any buffered ICE candidates
+    const bufferedCandidateCount = iceCandidateQueueRef.current.length;
     await drainIceCandidateQueue(pc, iceCandidateQueueRef.current);
+    console.info("[CALL TRACE] ICE candidates flushed", {
+      callId: session.callId,
+      count: bufferedCandidateCount,
+    });
     iceCandidateQueueRef.current = [];
 
-    // Send the answer back to the caller
-    if (signalChannelRef.current) {
-      await sendSignal(signalChannelRef.current, {
-        type: "call_accept",
+    try {
+      await sendSignal(signalChannel, {
+        type: "call_answer",
         call_id: session.callId,
         sender_id: currentUserId!,
         receiver_id: session.callerId,
@@ -642,15 +865,16 @@ export function useCallingState({
         timestamp: Date.now(),
         payload: { sdp_answer: answer },
       });
+      console.info("[CALL TRACE] call_answer sent", { callId: session.callId });
+    } catch {
+      void updateCallStatus(session.callId, "ended", true);
+      cleanupAll("call-answer-send-failed");
+      transition("CONNECTION_FAILED", "Could not complete call setup. Please try again.");
+      return;
     }
 
-    void updateCallStatus(session.callId, "active");
-    transition("CONNECTING");
-
     // ICE timeout
-    iceTimerRef.current = setTimeout(() => {
-      handleConnectionFailure("Connection timed out. Check your network and try again.");
-    }, ICE_TIMEOUT_MS);
+    startIceTimer("ICE-establishment-after-answer");
   }, [
     currentUserId,
     clearRingTimer,
@@ -658,6 +882,7 @@ export function useCallingState({
     setupPeerConnection,
     cleanupAll,
     handleConnectionFailure,
+    startIceTimer,
   ]);
 
   // ── rejectCall ────────────────────────────────────────────────────────────────
@@ -680,7 +905,7 @@ export function useCallingState({
     }
 
     void updateCallStatus(session.callId, "rejected");
-    cleanupAll();
+    cleanupAll("callee-rejected-call");
     transition("REJECTED", "Call declined.");
   }, [currentUserId, clearRingTimer, cleanupAll, transition]);
 
@@ -704,7 +929,7 @@ export function useCallingState({
     }
 
     void updateCallStatus(session.callId, "ended", true);
-    cleanupAll();
+    cleanupAll("caller-cancelled-call");
     transition("CANCELLED", "Call cancelled.");
   }, [currentUserId, clearRingTimer, cleanupAll, transition]);
 
@@ -732,7 +957,7 @@ export function useCallingState({
     }
 
     void updateCallStatus(session.callId, "ended", true);
-    cleanupAll();
+    cleanupAll("local-call-ended");
     transition("ENDED", "Call ended.");
   }, [currentUserId, cleanupAll, transition]);
 
@@ -764,9 +989,17 @@ export function useCallingState({
     // Cleanup stale calls from a previous session
     void cleanupStaleCalls(currentUserId);
 
-    const { channel, unsubscribe } = subscribeToNotifications(
+    const { channel, unsubscribe, ready } = subscribeToNotifications(
       currentUserId,
       (msg) => {
+        console.info("[CALL TRACE] callee notification received", {
+          callId: msg.call_id,
+          senderId: msg.sender_id,
+          receiverId: msg.receiver_id,
+          communityId: msg.community_id,
+          callType: (msg.payload as { call_type?: CallType } | undefined)?.call_type,
+        });
+        if (isDuplicate(msg)) return;
         // Ignore if already in a call — auto-reject (busy)
         if (statusRef.current !== "IDLE") {
           void sendSignal(channel, {
@@ -794,32 +1027,54 @@ export function useCallingState({
           callerName: payload?.caller_name ?? "Siber Member",
         };
 
+        connectionFailureHandledRef.current = false;
         setCallSession(session);
         sessionRef.current = session;
         bufferedOfferRef.current = null;
 
-        // Subscribe to the shared signal channel to receive the offer + ICE
-        subscribeToCallChannel(session);
-
-        transition(
-          "INCOMING_RING",
-          `Incoming ${session.callType} call from ${session.callerName}`
-        );
-
-        // Ring timeout for callee side
-        ringTimerRef.current = setTimeout(() => {
-          if (statusRef.current === "INCOMING_RING") {
-            void updateCallStatus(session.callId, "missed");
-            cleanupAll();
-            transition("MISSED", "Missed call.");
-          }
-        }, RING_TIMEOUT_MS);
+        void subscribeToCallChannel(session)
+          .then(() => {
+            transition(
+              "INCOMING_RING",
+              `Incoming ${session.callType} call from ${session.callerName}`
+            );
+            ringTimerRef.current = setTimeout(() => {
+              console.warn("[CALL TRACE] incoming ring timeout fired", {
+                callId: session.callId,
+                status: statusRef.current,
+                durationMs: RING_TIMEOUT_MS,
+              });
+              if (statusRef.current === "INCOMING_RING") {
+                void updateCallStatus(session.callId, "missed");
+                cleanupAll("callee-ring-timeout");
+                transition("MISSED", "Missed call.");
+              }
+            }, RING_TIMEOUT_MS);
+            console.info("[CALL TRACE] incoming ring timeout started", {
+              callId: session.callId,
+              durationMs: RING_TIMEOUT_MS,
+            });
+          })
+          .catch((error) => {
+            console.error("[CALL TRACE] callee signaling subscription failed", error);
+            void updateCallStatus(session.callId, "rejected");
+            cleanupAll("callee-signaling-subscription-failed");
+            transition("CONNECTION_FAILED", "Call signaling is unavailable. Please try again.");
+          });
       }
     );
 
     notifyChannelRef.current = channel;
 
+    void ready.catch((error) => {
+      console.warn("[CALL DEBUG] callee: notification channel not ready", error);
+    });
+
     return () => {
+      console.trace("[CALL TRACE] notification effect cleanup", {
+        currentUserId,
+        communityId,
+      });
       unsubscribe();
       notifyChannelRef.current = null;
     };
@@ -829,6 +1084,10 @@ export function useCallingState({
 
   useEffect(() => {
     const onBeforeUnload = () => {
+      console.trace("[CALL TRACE] beforeunload cleanup", {
+        status: statusRef.current,
+        callId: sessionRef.current?.callId ?? null,
+      });
       const sess = sessionRef.current;
       const status = statusRef.current;
 
@@ -856,7 +1115,11 @@ export function useCallingState({
 
   useEffect(() => {
     return () => {
-      cleanupAll();
+      console.trace("[CALL TRACE] calling hook unmount cleanup", {
+        status: statusRef.current,
+        callId: sessionRef.current?.callId ?? null,
+      });
+      cleanupAll("calling-hook-unmount");
       if (notifyChannelRef.current) {
         void supabase.removeChannel(notifyChannelRef.current);
         notifyChannelRef.current = null;

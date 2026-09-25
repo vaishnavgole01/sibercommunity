@@ -49,6 +49,7 @@ export type SignalType =
   | "call_invite"   // caller → callee (personal notify channel)
   | "call_offer"    // caller → callee (shared signal channel)
   | "call_accept"   // callee → caller (shared signal channel)
+  | "call_answer"   // callee → caller (shared signal channel)
   | "call_reject"   // callee → caller (shared signal channel)
   | "call_cancel"   // caller → callee (shared signal channel)
   | "call_end"      // either → other  (shared signal channel)
@@ -67,7 +68,7 @@ export interface SignalMessage {
 export type SignalPayload =
   | CallInvitePayload
   | CallOfferPayload
-  | CallAcceptPayload
+  | CallAnswerPayload
   | IceCandidatePayload
   | Record<string, never>; // empty for reject/cancel/end
 
@@ -80,7 +81,7 @@ export interface CallOfferPayload {
   sdp_offer: RTCSessionDescriptionInit;
 }
 
-export interface CallAcceptPayload {
+export interface CallAnswerPayload {
   sdp_answer: RTCSessionDescriptionInit;
 }
 

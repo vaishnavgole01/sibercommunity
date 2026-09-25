@@ -84,13 +84,62 @@ export default function ActiveCall({
   useEffect(() => {
     if (!localVideoRef.current || !localStream) return;
     localVideoRef.current.srcObject = localStream;
-  }, [localStream]);
+    console.info("[CALL TRACE] local video element attached", {
+      trackKinds: localStream.getTracks().map((track) => track.kind),
+      muted: localVideoRef.current.muted,
+      paused: localVideoRef.current.paused,
+    });
+  }, [localStream, isCameraOff]);
 
   // Attach remote stream to remote video element
   useEffect(() => {
-    if (!remoteVideoRef.current || !remoteStream) return;
-    remoteVideoRef.current.srcObject = remoteStream;
-  }, [remoteStream]);
+    const video = remoteVideoRef.current;
+    if (!video || !remoteStream || status !== "ACTIVE") return;
+
+    video.srcObject = remoteStream;
+    console.info("[CALL TRACE] remote video element attached", {
+      remoteAudioTracks: remoteStream.getAudioTracks().map((track) => ({
+        kind: track.kind,
+        enabled: track.enabled,
+        muted: track.muted,
+        readyState: track.readyState,
+      })),
+      remoteVideoTracks: remoteStream.getVideoTracks().map((track) => ({
+        kind: track.kind,
+        readyState: track.readyState,
+        enabled: track.enabled,
+      })),
+      mediaElement: {
+        muted: video.muted,
+        volume: video.volume,
+        paused: video.paused,
+        readyState: video.readyState,
+        srcObject: video.srcObject,
+      },
+    });
+
+    const logPlaying = () => {
+      console.info("[CALL TRACE] remote video playback started", {
+        paused: video.paused,
+        readyState: video.readyState,
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+      });
+    };
+    video.addEventListener("playing", logPlaying);
+    void video.play().then(() => {
+      console.info("[CALL TRACE] remote video play() resolved", {
+        paused: video.paused,
+        readyState: video.readyState,
+        volume: video.volume,
+        muted: video.muted,
+      });
+    }).catch((error: unknown) => {
+      console.warn("[CALL TRACE] remote video play() rejected", error);
+    });
+
+    return () => video.removeEventListener("playing", logPlaying);
+  }, [remoteStream, status]);
 
   const isVideoCall = session.callType === "video";
   const isActive = status === "ACTIVE";

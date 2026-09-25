@@ -123,6 +123,10 @@ export default function CallButton({ members, onCall, disabled = false }: CallBu
                     type="button"
                     onClick={() => {
                       setOpen(false);
+                      console.info("[CALL TRACE] CallButton clicked", {
+                        targetUserId: m.user_id,
+                        callType: "audio",
+                      });
                       onCall(m.user_id, "audio");
                     }}
                     title={`Audio call ${m.display_name}`}
@@ -134,6 +138,10 @@ export default function CallButton({ members, onCall, disabled = false }: CallBu
                     type="button"
                     onClick={() => {
                       setOpen(false);
+                      console.info("[CALL TRACE] CallButton clicked", {
+                        targetUserId: m.user_id,
+                        callType: "video",
+                      });
                       onCall(m.user_id, "video");
                     }}
                     title={`Video call ${m.display_name}`}

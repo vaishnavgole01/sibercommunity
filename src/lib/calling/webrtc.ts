@@ -30,6 +30,7 @@ export interface GetMediaResult {
  * Returns the stream on success, or an error discriminant on failure.
  */
 export async function getLocalMedia(callType: CallType): Promise<GetMediaResult> {
+  console.info("[CALL TRACE] getUserMedia started", { callType });
   const constraints: MediaStreamConstraints = {
     audio: true,
     video: callType === "video" ? { facingMode: "user" } : false,
@@ -37,6 +38,13 @@ export async function getLocalMedia(callType: CallType): Promise<GetMediaResult>
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    console.info("[CALL TRACE] getUserMedia succeeded", {
+      tracks: stream.getTracks().map((track) => ({
+        kind: track.kind,
+        readyState: track.readyState,
+        enabled: track.enabled,
+      })),
+    });
     return { stream, error: null };
   } catch (err: unknown) {
     const domErr = err as DOMException;
@@ -88,8 +96,21 @@ export function addLocalTracks(
   stream: MediaStream
 ): void {
   for (const track of stream.getTracks()) {
-    pc.addTrack(track, stream);
+    const sender = pc.addTrack(track, stream);
+    console.info("[CALL TRACE] local track added", {
+      kind: track.kind,
+      readyState: track.readyState,
+      enabled: track.enabled,
+      senderTrackKind: sender.track?.kind ?? null,
+    });
   }
+  console.info("[CALL TRACE] peer connection senders", {
+    senders: pc.getSenders().map((sender) => ({
+      kind: sender.track?.kind ?? null,
+      readyState: sender.track?.readyState ?? null,
+      enabled: sender.track?.enabled ?? null,
+    })),
+  });
 }
 
 /**
@@ -99,6 +120,10 @@ export async function createOffer(
   pc: RTCPeerConnection
 ): Promise<RTCSessionDescriptionInit> {
   const offer = await pc.createOffer();
+  console.info("[CALL TRACE] local offer media sections", {
+    audio: offer.sdp?.includes("m=audio ") ?? false,
+    video: offer.sdp?.includes("m=video ") ?? false,
+  });
   await pc.setLocalDescription(offer);
   return offer;
 }
@@ -113,6 +138,10 @@ export async function createAnswer(
 ): Promise<RTCSessionDescriptionInit> {
   await pc.setRemoteDescription(new RTCSessionDescription(remoteOffer));
   const answer = await pc.createAnswer();
+  console.info("[CALL TRACE] local answer media sections", {
+    audio: answer.sdp?.includes("m=audio ") ?? false,
+    video: answer.sdp?.includes("m=video ") ?? false,
+  });
   await pc.setLocalDescription(answer);
   return answer;
 }
@@ -163,6 +192,12 @@ export async function drainIceCandidateQueue(
  */
 export function stopStream(stream: MediaStream | null): void {
   if (!stream) return;
+  console.trace("[CALL TRACE] stopping media tracks", {
+    tracks: stream.getTracks().map((track) => ({
+      kind: track.kind,
+      readyState: track.readyState,
+    })),
+  });
   for (const track of stream.getTracks()) {
     track.stop();
   }
@@ -174,6 +209,10 @@ export function stopStream(stream: MediaStream | null): void {
 export function closePeerConnection(pc: RTCPeerConnection | null): void {
   if (!pc) return;
   if (pc.signalingState !== "closed") {
+    console.trace("[CALL TRACE] closing peer connection", {
+      signalingState: pc.signalingState,
+      connectionState: pc.connectionState,
+    });
     pc.close();
   }
 }
