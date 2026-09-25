@@ -82,7 +82,11 @@ async function logAudioRtpStats(
   pc: RTCPeerConnection,
   role: "caller" | "receiver",
   callId: string,
-  sample: "ACTIVE" | "ACTIVE+2500ms"
+  sample:
+    | "CONNECTION_ATTEMPT"
+    | "CONNECTION_ATTEMPT+2500ms"
+    | "ACTIVE"
+    | "ACTIVE+2500ms"
 ): Promise<void> {
   try {
     const stats = await pc.getStats();
@@ -110,7 +114,7 @@ async function logAudioRtpStats(
 
       if (rawReport.type === "candidate-pair") {
         const pair = rawReport as RTCIceCandidatePairStats & { selected?: boolean };
-        if (pair.selected || (pair.nominated && pair.state === "succeeded")) {
+        if (pair.selected || pair.nominated || pair.state === "in-progress") {
           candidatePairs.push({
             state: pair.state,
             nominated: pair.nominated,
@@ -167,20 +171,53 @@ async function logAudioRtpStats(
       role,
       callId,
       sample,
+      peerState: {
+        connectionState: pc.connectionState,
+        iceConnectionState: pc.iceConnectionState,
+        signalingState: pc.signalingState,
+      },
       outboundAudio,
       inboundAudio,
       candidatePairs,
-      senders: pc.getSenders().map((sender) => ({
-        kind: sender.track?.kind,
-        enabled: sender.track?.enabled,
-        readyState: sender.track?.readyState,
-      })),
+      senders: pc.getSenders().map((sender) => {
+        const parameters = sender.getParameters();
+        return {
+          kind: sender.track?.kind,
+          enabled: sender.track?.enabled,
+          muted: sender.track?.muted,
+          readyState: sender.track?.readyState,
+          encodings: parameters.encodings?.map((encoding) => ({
+            active: encoding.active,
+            maxBitrate: encoding.maxBitrate,
+            priority: encoding.priority,
+            networkPriority: encoding.networkPriority,
+          })),
+          codecs: parameters.codecs?.map((codec) => ({
+            mimeType: codec.mimeType,
+            payloadType: codec.payloadType,
+            clockRate: codec.clockRate,
+            channels: codec.channels,
+          })),
+        };
+      }),
       receivers: pc.getReceivers().map((receiver) => ({
         kind: receiver.track?.kind,
         enabled: receiver.track?.enabled,
         muted: receiver.track?.muted,
         readyState: receiver.track?.readyState,
       })),
+      audioTransceivers: pc.getTransceivers()
+        .filter((transceiver) =>
+          transceiver.sender.track?.kind === "audio" ||
+          transceiver.receiver.track?.kind === "audio"
+        )
+        .map((transceiver) => ({
+          senderTrackKind: transceiver.sender.track?.kind,
+          receiverTrackKind: transceiver.receiver.track?.kind,
+          direction: transceiver.direction,
+          currentDirection: transceiver.currentDirection,
+          mid: transceiver.mid,
+        })),
     });
   } catch (error) {
     console.warn("[CALL TRACE] audio RTP stats collection failed", {
@@ -495,6 +532,17 @@ export function useCallingState({
     (session: CallSession, stream: MediaStream): RTCPeerConnection => {
       const pc = createPeerConnection();
       addLocalTracks(pc, stream);
+      let connectionAttemptStatsScheduled = false;
+
+      const scheduleConnectionAttemptStats = () => {
+        if (connectionAttemptStatsScheduled) return;
+        connectionAttemptStatsScheduled = true;
+        const role = currentUserId === session.callerId ? "caller" : "receiver";
+        void logAudioRtpStats(pc, role, session.callId, "CONNECTION_ATTEMPT");
+        setTimeout(() => {
+          void logAudioRtpStats(pc, role, session.callId, "CONNECTION_ATTEMPT+2500ms");
+        }, 2_500);
+      };
 
       // Remote stream arrives via ontrack
       pc.ontrack = (event) => {
@@ -578,6 +626,12 @@ export function useCallingState({
           iceConnectionState: pc.iceConnectionState,
           signalingState: pc.signalingState,
         });
+        if (
+          pc.connectionState === "connecting" ||
+          pc.iceConnectionState === "checking"
+        ) {
+          scheduleConnectionAttemptStats();
+        }
         if (!isPeerConnectionEstablished(pc)) return;
         if (statusRef.current === "CONNECTING") {
           const sess = sessionRef.current;
@@ -590,6 +644,14 @@ export function useCallingState({
 
       pc.oniceconnectionstatechange = () => {
         const state = pc.iceConnectionState;
+        console.info("[CALL TRACE] RTCPeerConnection iceConnectionState change", {
+          connectionState: pc.connectionState,
+          iceConnectionState: state,
+          signalingState: pc.signalingState,
+        });
+        if (pc.connectionState === "connecting" || state === "checking") {
+          scheduleConnectionAttemptStats();
+        }
 
         if (isConnected(state)) {
           if (statusRef.current === "CONNECTING") {

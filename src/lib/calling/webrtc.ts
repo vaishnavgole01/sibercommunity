@@ -94,6 +94,37 @@ export function createPeerConnection(): RTCPeerConnection {
   return new RTCPeerConnection({ iceServers: ICE_SERVERS });
 }
 
+function audioSdpSummary(sdp: string | undefined) {
+  if (!sdp) return { present: false, direction: "unavailable", codecs: [] };
+
+  const lines = sdp.split(/\r?\n/);
+  const audioStart = lines.findIndex((line) => line.startsWith("m=audio "));
+  if (audioStart < 0) return { present: false, direction: "unavailable", codecs: [] };
+
+  const sectionEnd = lines.findIndex(
+    (line, index) => index > audioStart && line.startsWith("m=")
+  );
+  const audioLines = lines.slice(audioStart, sectionEnd < 0 ? undefined : sectionEnd);
+  const directionPattern = /^a=(sendrecv|sendonly|recvonly|inactive)$/;
+  const mediaDirection = audioLines.map((line) => line.match(directionPattern)?.[1]).find(Boolean);
+  const sessionDirection = lines
+    .slice(0, lines.findIndex((line) => line.startsWith("m=")))
+    .map((line) => line.match(directionPattern)?.[1])
+    .find(Boolean);
+  const formats = audioLines[0]?.trim().split(/\s+/).slice(3) ?? [];
+  const codecs = audioLines.flatMap((line) => {
+    const match = line.match(/^a=rtpmap:(\d+)\s+([^\s]+)/);
+    return match ? [{ payloadType: match[1], codec: match[2] }] : [];
+  });
+
+  return {
+    present: true,
+    direction: mediaDirection ?? sessionDirection ?? "sendrecv (default)",
+    formats,
+    codecs,
+  };
+}
+
 /**
  * Add all tracks from localStream to the peer connection.
  * Must be called before createOffer or setRemoteDescription.
@@ -138,6 +169,7 @@ export async function createOffer(
   console.info("[CALL TRACE] local offer media sections", {
     audio: offer.sdp?.includes("m=audio ") ?? false,
     video: offer.sdp?.includes("m=video ") ?? false,
+    audioDetails: audioSdpSummary(offer.sdp),
   });
   await pc.setLocalDescription(offer);
   return offer;
@@ -156,6 +188,7 @@ export async function createAnswer(
   console.info("[CALL TRACE] local answer media sections", {
     audio: answer.sdp?.includes("m=audio ") ?? false,
     video: answer.sdp?.includes("m=video ") ?? false,
+    audioDetails: audioSdpSummary(answer.sdp),
   });
   await pc.setLocalDescription(answer);
   return answer;
