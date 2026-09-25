@@ -381,16 +381,33 @@ export function useCallingState({
         }
         console.info("[CALL TRACE] remote track received", {
           kind: event.track.kind,
-          readyState: event.track.readyState,
           enabled: event.track.enabled,
+          muted: event.track.muted,
+          readyState: event.track.readyState,
           eventStreamCount: event.streams.length,
           eventStreamTrackKinds: event.streams.flatMap((stream) =>
-            stream.getTracks().map((track) => ({ kind: track.kind, readyState: track.readyState }))
+            stream.getTracks().map((track) => ({
+              kind: track.kind,
+              enabled: track.enabled,
+              muted: track.muted,
+              readyState: track.readyState,
+            }))
           ),
           assembledStreamTrackKinds: remoteTrackStream.getTracks().map((track) => ({
             kind: track.kind,
+            enabled: track.enabled,
+            muted: track.muted,
             readyState: track.readyState,
           })),
+          hasAudioReceiver: pc.getReceivers().some((receiver) => receiver.track?.kind === "audio"),
+          audioReceivers: pc.getReceivers()
+            .filter((receiver) => receiver.track?.kind === "audio")
+            .map((receiver) => ({
+              kind: receiver.track?.kind,
+              enabled: receiver.track?.enabled,
+              muted: receiver.track?.muted,
+              readyState: receiver.track?.readyState,
+            })),
           receivers: pc.getReceivers().map((receiver) => ({
             kind: receiver.track?.kind,
             enabled: receiver.track?.enabled,

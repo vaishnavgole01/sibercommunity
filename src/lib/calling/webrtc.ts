@@ -39,6 +39,13 @@ export async function getLocalMedia(callType: CallType): Promise<GetMediaResult>
   try {
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
     console.info("[CALL TRACE] getUserMedia succeeded", {
+      hasAudioTrack: stream.getAudioTracks().length > 0,
+      audioTracks: stream.getAudioTracks().map((track) => ({
+        kind: track.kind,
+        enabled: track.enabled,
+        muted: track.muted,
+        readyState: track.readyState,
+      })),
       tracks: stream.getTracks().map((track) => ({
         kind: track.kind,
         readyState: track.readyState,
@@ -105,6 +112,14 @@ export function addLocalTracks(
     });
   }
   console.info("[CALL TRACE] peer connection senders", {
+    hasAudioSender: pc.getSenders().some((sender) => sender.track?.kind === "audio"),
+    audioSenders: pc.getSenders()
+      .filter((sender) => sender.track?.kind === "audio")
+      .map((sender) => ({
+        kind: sender.track?.kind,
+        enabled: sender.track?.enabled,
+        readyState: sender.track?.readyState,
+      })),
     senders: pc.getSenders().map((sender) => ({
       kind: sender.track?.kind ?? null,
       readyState: sender.track?.readyState ?? null,

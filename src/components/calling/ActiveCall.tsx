@@ -86,6 +86,7 @@ export default function ActiveCall({
     localVideoRef.current.srcObject = localStream;
     console.info("[CALL TRACE] local video element attached", {
       trackKinds: localStream.getTracks().map((track) => track.kind),
+      localPreviewMuted: localVideoRef.current.muted,
       muted: localVideoRef.current.muted,
       paused: localVideoRef.current.paused,
     });
@@ -109,12 +110,19 @@ export default function ActiveCall({
         readyState: track.readyState,
         enabled: track.enabled,
       })),
+      hasAudioTrack: remoteStream.getAudioTracks().length > 0,
+      hasVideoTrack: remoteStream.getVideoTracks().length > 0,
       mediaElement: {
         muted: video.muted,
+        remoteElementNotMuted: !video.muted,
         volume: video.volume,
+        remoteVolumeNonZero: video.volume > 0,
         paused: video.paused,
         readyState: video.readyState,
         srcObject: video.srcObject,
+        hasAudioTrack:
+          video.srcObject instanceof MediaStream &&
+          video.srcObject.getAudioTracks().length > 0,
       },
     });
 
@@ -135,7 +143,9 @@ export default function ActiveCall({
         muted: video.muted,
       });
     }).catch((error: unknown) => {
-      console.warn("[CALL TRACE] remote video play() rejected", error);
+      console.warn("[CALL TRACE] remote video play() rejected", error instanceof Error
+        ? { name: error.name, message: error.message }
+        : error);
     });
 
     return () => video.removeEventListener("playing", logPlaying);
