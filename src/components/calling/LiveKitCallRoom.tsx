@@ -14,7 +14,7 @@ import {
 } from "@livekit/components-react";
 import { RoomEvent, Track } from "livekit-client";
 import { MonitorUp } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { LiveKitConnectionDetails } from "@/lib/calling/livekit/client";
 import type { CallType } from "@/lib/calling/types";
 import CallControls from "@/components/calling/CallControls";
@@ -84,6 +84,104 @@ function LiveKitCallRoomContent({
     isCameraEnabled,
     isScreenShareEnabled,
   } = useLocalParticipant();
+  const measuredLocalMicTrackIds = useRef<Set<string>>(new Set());
+  const measuredRemoteMicTrackIds = useRef<Set<string>>(new Set());
+
+  const logAudioEnergyFailure = (
+    reason: string,
+    participantIdentity: string,
+    trackSid: string | null,
+    track?: MediaStreamTrack,
+  ) => {
+    console.info("[LIVEKIT E2E AUDIO ERROR]", {
+      reason,
+      participantIdentity,
+      trackSid,
+      readyState: track?.readyState ?? null,
+      enabled: track?.enabled ?? null,
+      muted: track?.muted ?? null,
+    });
+  };
+
+  const measureAudioEnergy = async (
+    track: MediaStreamTrack | undefined,
+    participantIdentity: string,
+    trackSid: string | null,
+    logLabel: "[LIVEKIT E2E AUDIO INPUT]" | "[LIVEKIT E2E REMOTE AUDIO]",
+  ) => {
+    if (!track || track.kind !== "audio") {
+      logAudioEnergyFailure("track-unavailable", participantIdentity, trackSid, track);
+      return null;
+    }
+
+    try {
+      const AudioCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtor) {
+        logAudioEnergyFailure("audio-context-unavailable", participantIdentity, trackSid, track);
+        return null;
+      }
+
+      const context = new AudioCtor();
+      const tempStream = new MediaStream([track]);
+      const source = context.createMediaStreamSource(tempStream);
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 2048;
+      source.connect(analyser);
+
+      try {
+        const samples: number[] = [];
+        const startedAt = performance.now();
+
+        while (performance.now() - startedAt < 1000) {
+          const buffer = new Uint8Array(analyser.fftSize);
+          analyser.getByteTimeDomainData(buffer);
+          const normalized = Array.from(buffer).map((value) => (value - 128) / 128);
+          const rms = Math.sqrt(normalized.reduce((sum, value) => sum + value * value, 0) / normalized.length);
+          const averageAbsolute = normalized.reduce((sum, value) => sum + Math.abs(value), 0) / normalized.length;
+          samples.push(rms);
+          samples.push(averageAbsolute);
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+
+        const rmsSamples = samples.filter((_, index) => index % 2 === 0);
+        const absoluteSamples = samples.filter((_, index) => index % 2 === 1);
+        const rms = rmsSamples.length > 0 ? rmsSamples.reduce((sum, value) => sum + value, 0) / rmsSamples.length : 0;
+        const averageAbsolute = absoluteSamples.length > 0 ? absoluteSamples.reduce((sum, value) => sum + value, 0) / absoluteSamples.length : 0;
+        const hasAudioSignal = rms > 0.01 || averageAbsolute > 0.01;
+
+        console.info(logLabel, {
+          participantIdentity,
+          trackSid,
+          readyState: track.readyState,
+          enabled: track.enabled,
+          muted: track.muted,
+          rms: Number(rms.toFixed(6)),
+          averageAbsolute: Number(averageAbsolute.toFixed(6)),
+          hasAudioSignal,
+        });
+
+        return {
+          participantIdentity,
+          trackSid,
+          readyState: track.readyState,
+          enabled: track.enabled,
+          muted: track.muted,
+          rms: Number(rms.toFixed(6)),
+          averageAbsolute: Number(averageAbsolute.toFixed(6)),
+          hasAudioSignal,
+        };
+      } finally {
+        source.disconnect();
+        analyser.disconnect();
+        await context.close().catch((error: unknown) => {
+          logAudioEnergyFailure(error instanceof Error ? `${error.name}: ${error.message}` : String(error), participantIdentity, trackSid, track);
+        });
+      }
+    } catch (error: unknown) {
+      logAudioEnergyFailure(error instanceof Error ? `${error.name}: ${error.message}` : String(error), participantIdentity, trackSid, track);
+      return null;
+    }
+  };
 
   useEffect(() => {
     console.info("[LIVEKIT AUDIO] playback permission state", {
@@ -113,6 +211,14 @@ function LiveKitCallRoomContent({
     const onPublished = (publication: { source: Track.Source; trackSid: string; isMuted: boolean; track?: { kind: string; mediaStreamTrack: MediaStreamTrack } }) => {
       if (publication.source !== Track.Source.Microphone) return;
       logLocalMicrophone("local-track-published");
+      const localTrack = publication.track?.mediaStreamTrack ?? localParticipant.getTrackPublication(Track.Source.Microphone)?.track?.mediaStreamTrack;
+      if (!localTrack) {
+        logAudioEnergyFailure("local-microphone-track-unavailable", localParticipant.identity, publication.trackSid, publication.track?.mediaStreamTrack);
+        return;
+      }
+      if (measuredLocalMicTrackIds.current.has(publication.trackSid)) return;
+      measuredLocalMicTrackIds.current.add(publication.trackSid);
+      void measureAudioEnergy(localTrack, localParticipant.identity, publication.trackSid, "[LIVEKIT E2E AUDIO INPUT]");
     };
     const onMuted = (publication: { source: Track.Source }) => {
       if (publication.source === Track.Source.Microphone) logLocalMicrophone("microphone-muted");
@@ -266,6 +372,17 @@ function LiveKitCallRoomContent({
         });
       }
       logRemoteMicrophone(participant, "track-subscribed");
+      if (publication.source === Track.Source.Microphone && track.kind === Track.Kind.Audio) {
+        const nextTrackSid = publication.trackSid ?? track.mediaStreamTrack.id ?? null;
+        if (!nextTrackSid) {
+          logAudioEnergyFailure("remote-microphone-track-sid-unavailable", participant.identity, null, track.mediaStreamTrack);
+          return;
+        }
+        if (!measuredRemoteMicTrackIds.current.has(nextTrackSid)) {
+          measuredRemoteMicTrackIds.current.add(nextTrackSid);
+          void measureAudioEnergy(track.mediaStreamTrack, participant.identity, nextTrackSid, "[LIVEKIT E2E REMOTE AUDIO]");
+        }
+      }
       logRemotePlayback(participant.identity, publication.trackSid, track, room.state, room.canPlaybackAudio);
     };
     const onTrackUnsubscribed = (
@@ -320,72 +437,6 @@ function LiveKitCallRoomContent({
     };
   }, [localParticipant, room]);
 
-    const measureAudioActivity = async (track: MediaStreamTrack | undefined) => {
-    if (!track || track.kind !== "audio" || track.readyState !== "live") {
-      return { ok: false, reason: "track-not-live" };
-    }
-
-    const AudioCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtor) {
-      return { ok: false, reason: "audio-context-unavailable" };
-    }
-
-    const audioContext = new AudioCtor();
-    try {
-      const stream = new MediaStream([track]);
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 2048;
-      source.connect(analyser);
-
-      const frames = 5;
-      const readings: number[] = [];
-      let min = Number.POSITIVE_INFINITY;
-      let max = 0;
-      let sum = 0;
-
-      for (let i = 0; i < frames; i += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
-        const buffer = new Uint8Array(analyser.fftSize);
-        analyser.getByteTimeDomainData(buffer);
-
-        const values = Array.from(buffer).map((sample) => (sample - 128) / 128);
-        const rms = Math.sqrt(values.reduce((accum, value) => accum + value * value, 0) / values.length);
-        const peak = Math.max(...values.map((value) => Math.abs(value)), 0);
-
-        readings.push(rms);
-        min = Math.min(min, rms);
-        max = Math.max(max, peak);
-        sum += rms;
-      }
-
-      const average = readings.length > 0 ? sum / readings.length : 0;
-      const rms = readings.length > 0 ? Math.sqrt(readings.reduce((accum, value) => accum + value * value, 0) / readings.length) : 0;
-      const hasNonSilentSamples = readings.some((value) => value > 0.01) || max > 0.02;
-
-      return {
-        ok: true,
-        trackReadyState: track.readyState,
-        trackEnabled: track.enabled,
-        trackMuted: track.muted,
-        sampleCount: readings.length,
-        min: Number(min.toFixed(6)),
-        max: Number(max.toFixed(6)),
-        average: Number(average.toFixed(6)),
-        rms: Number(rms.toFixed(6)),
-        hasNonSilentSamples,
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        reason: error instanceof Error ? error.name : "unknown-audio-measurement-error",
-        message: error instanceof Error ? error.message : String(error),
-      };
-    } finally {
-      await audioContext.close().catch(() => undefined);
-    }
-  };
-
   const toggleMicrophone = () => {
     const enabled = !localParticipant.isMicrophoneEnabled;
     void localParticipant.setMicrophoneEnabled(enabled).then((publication) => {
@@ -398,29 +449,6 @@ function LiveKitCallRoomContent({
         trackKind: publication?.track?.kind ?? localParticipant.getTrackPublication(Track.Source.Microphone)?.track?.kind ?? null,
         trackSid: publication?.trackSid ?? localParticipant.getTrackPublication(Track.Source.Microphone)?.trackSid ?? null,
       });
-
-      const localTrack = publication?.track ?? localParticipant.getTrackPublication(Track.Source.Microphone)?.track;
-      if (localTrack && localTrack.kind === "audio") {
-        void measureAudioActivity(localTrack.mediaStreamTrack).then((result) => {
-          console.info("[LIVEKIT AUDIO INPUT LEVEL]", {
-            participantIdentity: localParticipant.identity,
-            trackSid: localTrack.sid ?? localParticipant.getTrackPublication(Track.Source.Microphone)?.trackSid ?? null,
-            trackKind: localTrack.kind,
-            trackReadyState: localTrack.mediaStreamTrack.readyState,
-            trackEnabled: localTrack.mediaStreamTrack.enabled,
-            trackMuted: localTrack.mediaStreamTrack.muted,
-            mediaStreamExists: Boolean(localTrack.mediaStreamTrack),
-            mediaStreamTrackExists: Boolean(localTrack.mediaStreamTrack),
-            sampleCount: result.ok && "sampleCount" in result ? result.sampleCount : null,
-            min: result.ok && "min" in result ? result.min : null,
-            max: result.ok && "max" in result ? result.max : null,
-            average: result.ok && "average" in result ? result.average : null,
-            rms: result.ok && "rms" in result ? result.rms : null,
-            hasNonSilentSamples: result.ok && "hasNonSilentSamples" in result ? result.hasNonSilentSamples : null,
-            result,
-          });
-        });
-      }
     }).catch(onError);
   };
   const toggleCamera = () => {
