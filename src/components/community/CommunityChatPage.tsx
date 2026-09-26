@@ -12,6 +12,8 @@ import {
   type ChatMessage,
 } from "@/lib/chat";
 import CallingProvider, { useCallingContext } from "@/components/calling/CallingProvider";
+import LiveKitCallingProvider from "@/components/calling/LiveKitCallingProvider";
+import LiveKitCallActions from "@/components/calling/LiveKitCallActions";
 import CallButton from "@/components/calling/CallButton";
 
 /* ── Types ────────────────────────────────────────────────────── */
@@ -101,6 +103,7 @@ export default function CommunityChatPage() {
       user?.email?.split("@")[0] ??
       "You"
   );
+  const useLegacyCalling = process.env.NEXT_PUBLIC_CALLING_PROVIDER === "legacy";
 
   /* ── Resolve author name (cache + fallback) ── */
   const resolveAuthorName = useCallback(
@@ -261,13 +264,7 @@ export default function CommunityChatPage() {
     );
   }
 
-  return (
-    <CallingProvider
-      currentUserId={user?.id ?? null}
-      currentUserName={myName}
-      communityId={communityId}
-      rawMembers={members}
-    >
+  const chatContent = (
     <div className="flex h-screen overflow-hidden bg-[#09080c] text-white">
 
       {/* ══ LEFT SIDEBAR ══ */}
@@ -374,7 +371,9 @@ export default function CommunityChatPage() {
           {/* Right side: call button + mobile members toggle */}
           <div className="flex items-center gap-2">
             {/* Call a member — only shown to members */}
-            {isMember ? <ChatCallButton members={members} /> : null}
+            {isMember ? (
+              useLegacyCalling ? <ChatCallButton members={members} /> : <LiveKitCallActions />
+            ) : null}
 
             {/* Members toggle (mobile) */}
             <button
@@ -533,7 +532,26 @@ export default function CommunityChatPage() {
         </div>
       </div>
     </div>
+  );
+
+  return useLegacyCalling ? (
+    <CallingProvider
+      currentUserId={user?.id ?? null}
+      currentUserName={myName}
+      communityId={communityId}
+      rawMembers={members}
+    >
+      {chatContent}
     </CallingProvider>
+  ) : (
+    <LiveKitCallingProvider
+      currentUserId={user?.id ?? null}
+      currentUserName={myName}
+      communityId={communityId}
+      rawMembers={members}
+    >
+      {chatContent}
+    </LiveKitCallingProvider>
   );
 }
 
