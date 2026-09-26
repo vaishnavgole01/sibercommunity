@@ -184,46 +184,68 @@ function LiveKitCallRoomContent({
       roomState: string,
       canPlayAudio: boolean,
     ) => {
-      const audioElements = Array.from(document.querySelectorAll("audio")).filter((element) => {
-        const maybeSource = element.getAttribute("data-lk-source");
-        return maybeSource === "microphone" || maybeSource === "screen_share_audio" || element.srcObject instanceof MediaStream;
-      });
+      setTimeout(() => {
+        const audioElements = Array.from(document.querySelectorAll("audio")).filter((element) => {
+          const maybeSource = element.getAttribute("data-lk-source");
+          return maybeSource === "microphone" || maybeSource === "screen_share_audio" || element.srcObject instanceof MediaStream;
+        });
 
-      const playbackState = audioElements.map((element) => ({
-        elementExists: true,
-        muted: element.muted,
-        volume: element.volume,
-        paused: element.paused,
-        autoplay: element.autoplay,
-        readyState: element.readyState,
-        srcObjectExists: Boolean(element.srcObject),
-        srcObjectAudioTracks: element.srcObject instanceof MediaStream ? element.srcObject.getAudioTracks().length : 0,
-        audioTrackReadyState: element.srcObject instanceof MediaStream ? element.srcObject.getAudioTracks()[0]?.readyState ?? null : null,
-        audioTrackEnabled: element.srcObject instanceof MediaStream ? element.srcObject.getAudioTracks()[0]?.enabled ?? null : null,
-        audioTrackMuted: element.srcObject instanceof MediaStream ? element.srcObject.getAudioTracks()[0]?.muted ?? null : null,
-      }));
+        const selectedAudioElement = audioElements.find((element) => element.getAttribute("data-lk-source") === "microphone") ?? audioElements[0] ?? null;
 
-      const playResult = audioElements[0] ? audioElements[0].play().then(() => ({ ok: true })).catch((error: unknown) => ({
-        ok: false,
-        name: error instanceof Error ? error.name : "unknown",
-        message: error instanceof Error ? error.message : String(error),
-      })) : Promise.resolve({ ok: false, name: "no-audio-element", message: "no remote audio element found" });
+        const srcObject = selectedAudioElement?.srcObject instanceof MediaStream ? selectedAudioElement.srcObject : null;
+        const srcAudioTracks = srcObject ? srcObject.getAudioTracks() : [];
+        const remoteTrack = track?.mediaStreamTrack;
 
-      void playResult.then((result) => {
-        console.info("[LIVEKIT AUDIO PLAYBACK]", {
-          roomState,
-          canPlayAudio,
+        const payload = {
           participantIdentity,
           trackSid,
-          trackSource: track?.kind ?? "audio",
-          audioElementExists: audioElements.length > 0,
-          audioElementState: playbackState,
-          remoteTrackReadyState: track?.mediaStreamTrack.readyState ?? null,
-          remoteTrackEnabled: track?.mediaStreamTrack.enabled ?? null,
-          remoteTrackMuted: track?.mediaStreamTrack.muted ?? null,
-          playResult: result,
-        });
-      });
+          audioElementFound: Boolean(selectedAudioElement),
+          audioElementCount: audioElements.length,
+          muted: selectedAudioElement?.muted ?? null,
+          volume: selectedAudioElement?.volume ?? null,
+          paused: selectedAudioElement?.paused ?? null,
+          autoplay: selectedAudioElement?.autoplay ?? null,
+          readyState: selectedAudioElement?.readyState ?? null,
+          networkState: selectedAudioElement?.networkState ?? null,
+          srcObjectExists: Boolean(srcObject),
+          srcObjectTrackCount: srcObject ? srcObject.getTracks().length : 0,
+          srcObjectAudioTrackCount: srcAudioTracks.length,
+          remoteMediaTrackReadyState: remoteTrack?.readyState ?? null,
+          remoteMediaTrackEnabled: remoteTrack?.enabled ?? null,
+          remoteMediaTrackMuted: remoteTrack?.muted ?? null,
+          roomState,
+          roomCanPlaybackAudio: canPlayAudio,
+        };
+
+        console.info("[LIVEKIT AUDIO PLAYBACK]", payload);
+
+        if (!selectedAudioElement || !remoteTrack) {
+          console.info("[LIVEKIT AUDIO PLAYBACK RESULT]", {
+            success: false,
+            errorName: "no-audio-element-or-track",
+            errorMessage: "Remote microphone audio element or media track was not available.",
+          });
+          return;
+        }
+
+        void selectedAudioElement.play()
+          .then(() => {
+            console.info("[LIVEKIT AUDIO PLAYBACK RESULT]", {
+              success: true,
+              errorName: null,
+              errorMessage: null,
+            });
+          })
+          .catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : String(error);
+            const name = error instanceof Error ? error.name : "unknown";
+            console.info("[LIVEKIT AUDIO PLAYBACK RESULT]", {
+              success: false,
+              errorName: name,
+              errorMessage: message,
+            });
+          });
+      }, 100);
     };
 
     const onTrackSubscribed = (
@@ -316,34 +338,42 @@ function LiveKitCallRoomContent({
       analyser.fftSize = 2048;
       source.connect(analyser);
 
-      const samples: number[] = [];
-      const frames = 3;
+      const frames = 5;
+      const readings: number[] = [];
+      let min = Number.POSITIVE_INFINITY;
+      let max = 0;
+      let sum = 0;
+
       for (let i = 0; i < frames; i += 1) {
         await new Promise((resolve) => setTimeout(resolve, 250));
         const buffer = new Uint8Array(analyser.fftSize);
         analyser.getByteTimeDomainData(buffer);
-        let sum = 0;
-        let peak = 0;
-        for (let index = 0; index < buffer.length; index += 1) {
-          const value = (buffer[index] - 128) / 128;
-          sum += value * value;
-          peak = Math.max(peak, Math.abs(value));
-        }
-        const rms = Math.sqrt(sum / buffer.length);
-        samples.push(rms);
-        if (peak > 0.18) {
-          samples.push(peak);
-        }
+
+        const values = Array.from(buffer).map((sample) => (sample - 128) / 128);
+        const rms = Math.sqrt(values.reduce((accum, value) => accum + value * value, 0) / values.length);
+        const peak = Math.max(...values.map((value) => Math.abs(value)), 0);
+
+        readings.push(rms);
+        min = Math.min(min, rms);
+        max = Math.max(max, peak);
+        sum += rms;
       }
 
-      const average = samples.reduce((total, value) => total + value, 0) / Math.max(samples.length, 1);
+      const average = readings.length > 0 ? sum / readings.length : 0;
+      const rms = readings.length > 0 ? Math.sqrt(readings.reduce((accum, value) => accum + value * value, 0) / readings.length) : 0;
+      const hasNonSilentSamples = readings.some((value) => value > 0.01) || max > 0.02;
+
       return {
         ok: true,
-        readyState: track.readyState,
-        enabled: track.enabled,
-        muted: track.muted,
-        averageLevel: Number(average.toFixed(4)),
-        sampleCount: samples.length,
+        trackReadyState: track.readyState,
+        trackEnabled: track.enabled,
+        trackMuted: track.muted,
+        sampleCount: readings.length,
+        min: Number(min.toFixed(6)),
+        max: Number(max.toFixed(6)),
+        average: Number(average.toFixed(6)),
+        rms: Number(rms.toFixed(6)),
+        hasNonSilentSamples,
       };
     } catch (error) {
       return {
@@ -372,16 +402,22 @@ function LiveKitCallRoomContent({
       const localTrack = publication?.track ?? localParticipant.getTrackPublication(Track.Source.Microphone)?.track;
       if (localTrack && localTrack.kind === "audio") {
         void measureAudioActivity(localTrack.mediaStreamTrack).then((result) => {
-          console.info("[LIVEKIT AUDIO INPUT]", {
+          console.info("[LIVEKIT AUDIO INPUT LEVEL]", {
             participantIdentity: localParticipant.identity,
             trackSid: localTrack.sid ?? localParticipant.getTrackPublication(Track.Source.Microphone)?.trackSid ?? null,
             trackKind: localTrack.kind,
-            readyState: localTrack.mediaStreamTrack.readyState,
-            enabled: localTrack.mediaStreamTrack.enabled,
-            muted: localTrack.mediaStreamTrack.muted,
-            haveMediaStream: Boolean(localTrack.mediaStreamTrack),
-            haveMediaStreamTrack: Boolean(localTrack.mediaStreamTrack),
-            activityLevel: result,
+            trackReadyState: localTrack.mediaStreamTrack.readyState,
+            trackEnabled: localTrack.mediaStreamTrack.enabled,
+            trackMuted: localTrack.mediaStreamTrack.muted,
+            mediaStreamExists: Boolean(localTrack.mediaStreamTrack),
+            mediaStreamTrackExists: Boolean(localTrack.mediaStreamTrack),
+            sampleCount: result.ok && "sampleCount" in result ? result.sampleCount : null,
+            min: result.ok && "min" in result ? result.min : null,
+            max: result.ok && "max" in result ? result.max : null,
+            average: result.ok && "average" in result ? result.average : null,
+            rms: result.ok && "rms" in result ? result.rms : null,
+            hasNonSilentSamples: result.ok && "hasNonSilentSamples" in result ? result.hasNonSilentSamples : null,
+            result,
           });
         });
       }
